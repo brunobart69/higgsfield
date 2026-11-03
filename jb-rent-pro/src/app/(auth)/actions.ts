@@ -12,15 +12,7 @@ import {
   type FormState,
 } from "@/lib/auth/validation";
 import { safeInternalPath } from "@/lib/utils";
-
-async function siteUrl() {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured) return configured.replace(/\/$/, "");
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
+import { clientIp, siteUrl } from "@/lib/site";
 
 export async function signInAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = signInSchema.safeParse({
@@ -50,7 +42,7 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   }
 
   const ua = (await headers()).get("user-agent");
-  const { error: logError } = await supabase.rpc("log_sign_in", { p_user_agent: ua });
+  const { error: logError } = await supabase.rpc("log_sign_in", { p_user_agent: ua, p_ip: await clientIp() });
   if (logError) console.error("[auth] log_sign_in failed", logError.message);
 
   redirect(safeInternalPath(parsed.data.next));

@@ -39,6 +39,8 @@ export type FormState = {
   message?: string; // chave de auth.*
   /** Valores não sensíveis devolvidos ao formulário (o React 19 limpa o form após a action). */
   values?: { email?: string };
+  /** Variáveis para interpolar na mensagem traduzida. */
+  vars?: Record<string, string>;
 };
 
 export function toFieldErrors(error: z.ZodError): FieldErrors {
@@ -60,6 +62,7 @@ export function mapAuthError(err: { message?: string; status?: number; code?: st
   if (code === "email_not_confirmed" || msg.includes("email not confirmed")) return "emailNotConfirmed";
   if (code === "same_password" || msg.includes("different from the old")) return "samePassword";
   if (code === "weak_password") return "passwordWeak";
+  if (code === "user_banned" || msg.includes("banned")) return "noAccess";
   if (code === "session_not_found" || code === "session_expired" || msg.includes("auth session missing")) return "sessionExpired";
   return "generic";
 }

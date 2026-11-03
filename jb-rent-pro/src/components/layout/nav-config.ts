@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   FileSignature,
   FileText,
+  History,
   Gauge,
   Landmark,
   PiggyBank,
@@ -35,7 +36,7 @@ export type NavItem = {
 export type NavGroup = { key: GroupKey; items: NavItem[] };
 
 /** Fase atualmente implantada. Atualize ao concluir cada fase. */
-export const CURRENT_PHASE = 1;
+export const CURRENT_PHASE = 2;
 
 export const NAV: NavGroup[] = [
   {
@@ -77,6 +78,7 @@ export const NAV: NavGroup[] = [
     key: "admin",
     items: [
       { key: "users", href: "/users", icon: UserCog, phase: 2, ownerOnly: true },
+      { key: "activity", href: "/activity", icon: History, phase: 2 },
       { key: "settings", href: "/settings", icon: Settings, phase: 2, ownerOnly: true },
     ],
   },

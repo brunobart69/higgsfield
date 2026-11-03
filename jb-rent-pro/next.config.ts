@@ -11,6 +11,10 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    // upload de logotipo (até 2 MB) via Server Action
+    serverActions: { bodySizeLimit: "3mb" },
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

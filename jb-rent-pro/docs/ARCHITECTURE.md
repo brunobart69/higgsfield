@@ -96,6 +96,8 @@ Futuros módulos seguem o mesmo padrão: `src/app/(app)/<modulo>/` (páginas + `
 | ✅ `insurance_policies` | 1 (UI na 6) | Apólices, renovações (`renewed_from_id`) |
 | ✅ `documents` | 1 (UI na 6) | Metadados de arquivos no Storage, validade e retenção |
 | ✅ `financial_transactions` | 1 (UI na 8) | Receitas/despesas, competência e caixa, comprovante |
+| ✅ `fee_catalog` | 2 | Catálogo de taxas adicionais (por aluguel / por dia, IVA opcional) |
+| ✅ `branches` | 2 (UI futura) | Filiais — estrutura preparada para expansão |
 | `vehicle_photos` | 3 | Fotos (principal, externas, internas, detalhes) |
 | `customer_documents` | 3 | Documentos pessoais (DNI/NIE, carta de condução) com acesso restrito |
 | `rental_payments` | 4 | Pagamentos parciais do contrato → saldo pendente |
@@ -137,7 +139,10 @@ não é possível apagar um veículo ou cliente que tenha histórico — arquiva
 | Proibir exclusão definitiva de contratos/financeiro | trigger `app.prevent_hard_delete` (só proprietário + `app.allow_hard_delete=on`) |
 | Quem criou/alterou | `created_by/updated_by/created_at/updated_at` por trigger (não confiam no cliente) |
 | Histórico de alterações | trigger `app.log_activity` grava diff jsonb em `activity_logs` |
-| Admin não se autopromove; dono não se rebaixa | trigger `app.guard_profile_update` |
+| Admin não se autopromove; dono não se rebaixa nem se desativa; e-mail do perfil só muda pelo sistema | trigger `app.guard_profile_update` |
+| Sempre há ao menos um administrador principal ativo | trigger `app.ensure_active_owner` |
+| Perfil de convidado criado só quando o servidor define empresa/cargo em `app_metadata` | trigger `app.handle_user_app_metadata` em `auth.users` |
+| Eventos administrativos (convite, link de senha, sessões encerradas, logotipo) com autor | RPC `log_event` (lista fechada de ações) |
 
 ### 3.4 RLS (Row Level Security)
 
@@ -147,7 +152,8 @@ do usuário autenticado (apenas se `is_active`). Políticas:
 | Tabela | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
 | `companies` | equipe da empresa | — (só via sistema) | administrador principal | — |
-| `profiles` | equipe da empresa | — (trigger de convite) | o próprio / adm. principal | — |
+| `profiles` | equipe da empresa | — (trigger de convite) | o próprio (nome, telefone, idioma) / adm. principal | — |
+| `fee_catalog`, `branches` | equipe da empresa | adm. principal | adm. principal | adm. principal |
 | `activity_logs` | adm. principal: tudo · admin: só as próprias ações | — (só triggers) | — | — |
 | operacionais | equipe da empresa | equipe da empresa | equipe da empresa | adm. principal |
 | `storage.objects` (bucket `documents`) | pasta `<company_id>/…` | idem | idem | adm. principal |
@@ -183,9 +189,25 @@ Logout ─► POST /auth/signout
 ```
 
 **Criação de usuários.** O cadastro público deve ficar **desativado** no Supabase. O primeiro usuário
-criado vira automaticamente **Administrador principal** e cria a empresa. Os demais só recebem acesso se
-convidados pelo servidor (fase 2), que grava `company_id` e `role` em `app_metadata` — campo que o
-próprio usuário não consegue alterar. Conta sem convite autentica, mas não vê nenhum dado.
+criado vira automaticamente **Administrador principal** e cria a empresa. Os demais entram por convite:
+
+```
+Adm. principal ─► Usuários → Convidar (Server Action, requireOwner + zod)
+   ├─ auth.admin.inviteUserByEmail (service_role) ─► Supabase envia o e-mail
+   ├─ auth.admin.updateUserById(app_metadata = {company_id, role})
+   │     └─ trigger app.handle_user_app_metadata ─► cria o perfil (auditado)
+   │     (falhou? o usuário recém-criado é removido — nada fica pela metade)
+   └─ rpc log_event('user.invite')
+Convidado ─► link do e-mail ─► /auth/confirm (type=invite) ─► /reset-password ─► define a senha
+```
+
+`app_metadata` não pode ser alterado pelo próprio usuário. Conta sem convite autentica, mas não vê
+nenhum dado. **Desativar** um usuário: `profiles.is_active = false` (a RLS corta o acesso na hora) +
+`ban_duration` no Auth (impede novo login e a renovação das sessões abertas).
+
+**Permissões na aplicação.** Toda Server Action chama `requireStaff()` ou `requireOwner()` antes de
+qualquer operação; páginas exclusivas do administrador principal (Usuários, Configurações) mostram
+"sem permissão" para administradores. A RLS do banco aplica as mesmas regras de forma independente.
 
 ## 5. Internacionalização
 
@@ -213,8 +235,8 @@ próprio usuário não consegue alterar. Conta sem convite autentica, mas não v
 | Fase | Conteúdo | Situação |
 |---|---|---|
 | 1 | Identidade visual, estrutura, login, recuperação/alteração de senha, dashboard real, PWA, i18n, núcleo do banco com RLS | ✅ concluída |
-| 2 | Usuários (convite, ativação, cargos), configurações da empresa, histórico de acessos/atividades na interface, testes de permissão adicionais | próxima |
-| 3 | Veículos (ficha com abas, fotos, busca) e clientes (PF/PJ, documentos, busca, RGPD) | |
+| 2 | Usuários (convite, cargos, desativação, link de senha), configurações da empresa (dados, fiscal, preços padrão, contrato, taxas, logotipo), perfil próprio, histórico de acessos e registro de atividades | ✅ concluída |
+| 3 | Veículos (ficha com abas, fotos, busca) e clientes (PF/PJ, documentos, busca, RGPD) | próxima |
 | 4 | Reservas/contratos, cálculos, pagamentos, cauções, quilometragem, PDF PT/ES | |
 | 5 | Inspeções de entrega/devolução, comparação, avarias com fotos, PDF | |
 | 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | |

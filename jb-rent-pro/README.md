@@ -35,6 +35,10 @@ npm run dev
 
 ## Estado atual
 
-**Fase 1 concluída** — identidade visual, login, recuperação e alteração de senha, dashboard com dados
-reais do banco, idiomas PT/ES, PWA e núcleo do banco de dados (com RLS, auditoria e bloqueio de reservas
-conflitantes). Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.
+- **Fase 1 ✅** — identidade visual, login, recuperação e alteração de senha, dashboard com dados reais,
+  idiomas PT/ES, PWA e núcleo do banco (RLS, auditoria, bloqueio de reservas conflitantes).
+- **Fase 2 ✅** — usuários e convites, cargos e permissões, desativação com encerramento de sessões,
+  configurações da empresa (dados, fiscal, preços padrão, contrato, taxas adicionais, logotipo),
+  perfil próprio, histórico de acessos e registro de atividades com diferenças antes/depois.
+
+Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.
