@@ -41,6 +41,9 @@ export async function registerDocumentAction(input: Record<string, unknown>): Pr
   if (d.vehicle_id) revalidatePath(`/vehicles/${d.vehicle_id}`);
   if (d.rental_id) revalidatePath(`/rentals/${d.rental_id}`);
   if (d.insurance_policy_id) revalidatePath(`/insurance/${d.insurance_policy_id}`);
+  if (d.maintenance_id) revalidatePath(`/maintenance/${d.maintenance_id}`);
+  if (d.fine_id) revalidatePath(`/fines/${d.fine_id}`);
+  if (d.accident_id) revalidatePath(`/fines/accidents/${d.accident_id}`);
   return { ok: true };
 }
 
@@ -49,7 +52,7 @@ export async function archiveDocumentAction(id: string): Promise<FormState> {
   if (!guard.ok) return { error: guard.error };
   if (!uuidSchema.safeParse(id).success) return { error: "invalid" };
   const supabase = await createClient();
-  const { data, error } = await supabase.from("documents").update({ archived_at: new Date().toISOString() }).eq("id", id).select("vehicle_id, rental_id, insurance_policy_id");
+  const { data, error } = await supabase.from("documents").update({ archived_at: new Date().toISOString() }).eq("id", id).select("vehicle_id, rental_id, insurance_policy_id, maintenance_id, fine_id, accident_id");
   if (error) return { error: mapDbError(error) };
   if (!data?.[0]) return { error: "notFound" };
   revalidatePath("/documents");
@@ -57,6 +60,9 @@ export async function archiveDocumentAction(id: string): Promise<FormState> {
   if (r.vehicle_id) revalidatePath(`/vehicles/${r.vehicle_id}`);
   if (r.rental_id) revalidatePath(`/rentals/${r.rental_id}`);
   if (r.insurance_policy_id) revalidatePath(`/insurance/${r.insurance_policy_id}`);
+  if (r.maintenance_id) revalidatePath(`/maintenance/${r.maintenance_id}`);
+  if (r.fine_id) revalidatePath(`/fines/${r.fine_id}`);
+  if (r.accident_id) revalidatePath(`/fines/accidents/${r.accident_id}`);
   return { ok: true };
 }
 

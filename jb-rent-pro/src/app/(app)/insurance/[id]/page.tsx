@@ -185,7 +185,7 @@ export default async function PolicyPage({ params }: { params: Promise<{ id: str
         <CardContent>
           <LinkedDocuments
             companyId={session.profile.companyId}
-            target={{ kind: "insurance", policyId: p.id, vehicleId: p.vehicle_id }}
+            target={{ kind: "insurance", id: p.id, vehicleId: p.vehicle_id }}
             today={today}
             readOnly={archived}
             categories={["insurance_policy", "receipt", "invoice", "other"]}

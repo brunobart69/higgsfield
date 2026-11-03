@@ -16,6 +16,7 @@ export type DamageFormValues = {
   vehicle_id: string;
   rental_id?: string | null;
   inspection_id?: string | null;
+  accident_id?: string | null;
   detected_at?: string;
   mileage?: number | null;
   area?: string | null;
@@ -43,6 +44,7 @@ function Fields({ v }: { v: DamageFormValues }) {
       <input type="hidden" name="vehicle_id" value={v.vehicle_id} />
       <input type="hidden" name="rental_id" value={v.rental_id ?? ""} />
       <input type="hidden" name="inspection_id" value={v.inspection_id ?? ""} />
+      <input type="hidden" name="accident_id" value={v.accident_id ?? ""} />
       <div className="grid gap-4 sm:grid-cols-2">
         <SelectField label={f.category} name="category" defaultValue={v.category ?? "scratch"} options={DAMAGE_CATEGORIES.map((c) => ({ value: c, label: d.categories[c] }))} />
         <SelectField label={f.severity} name="severity" defaultValue={v.severity ?? "low"} options={DAMAGE_SEVERITIES.map((s) => ({ value: s, label: d.severities[s] }))} />

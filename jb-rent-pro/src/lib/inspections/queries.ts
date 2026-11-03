@@ -170,6 +170,7 @@ export type DamageDetail = DamageListItem & {
   rental_id: string | null;
   customer_id: string | null;
   inspection_id: string | null;
+  accident_id: string | null;
   mileage: number | null;
   repair_shop: string | null;
   resolved_at: string | null;

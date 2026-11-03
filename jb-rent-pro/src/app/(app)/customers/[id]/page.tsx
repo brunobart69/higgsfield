@@ -7,6 +7,8 @@ import { listCustomerDeposits } from "@/lib/rentals/queries";
 import { listDamages } from "@/lib/inspections/queries";
 import { DamageList } from "@/components/inspections/lists";
 import { getI18n } from "@/lib/i18n/server";
+import { listAccidents, listFines } from "@/lib/fines/queries";
+import { AccidentList, FineList } from "@/components/fines/lists";
 import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
 import {
@@ -27,7 +29,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FlashToast } from "@/components/ui/flash-toast";
 import { InfoGrid } from "@/components/ui/info-grid";
-import { PhaseNotice } from "@/components/ui/phase-notice";
 import { TabsNav } from "@/components/ui/tabs-nav";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { ActivityList } from "@/components/activity/activity-list";
@@ -233,7 +234,7 @@ export default async function CustomerPage({
       {tab === "rentals" && <RentalsTab id={id} />}
       {tab === "payments" && <PaymentsTab id={id} />}
       {tab === "deposits" && <DepositsTab id={id} />}
-      {tab === "fines" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
+      {tab === "fines" && <CustomerFinesTab id={id} />}
       {tab === "damages" && <DamagesTab id={id} />}
       {tab === "documents" && (
         <CustomerDocuments
@@ -350,5 +351,22 @@ async function HistoryTab({ id }: { id: string }) {
         <ActivityList rows={rows} names={names} />
       </CardContent>
     </Card>
+  );
+}
+
+async function CustomerFinesTab({ id }: { id: string }) {
+  const [{ t, locale }, fines, accidents] = await Promise.all([getI18n(), listFines({ customerId: id }), listAccidents({ customerId: id })]);
+  const today = todayInMadrid();
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{t.fines.tabs.fines}</h2>
+        {fines.length === 0 ? <p className="text-sm text-muted">{t.fines.empty}</p> : <FineList rows={fines} t={t} locale={locale} today={today} />}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{t.fines.tabs.accidents}</h2>
+        {accidents.length === 0 ? <p className="text-sm text-muted">{t.accidents.empty}</p> : <AccidentList rows={accidents} t={t} locale={locale} />}
+      </section>
+    </div>
   );
 }

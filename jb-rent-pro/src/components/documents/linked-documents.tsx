@@ -25,7 +25,7 @@ export function LinkedDocuments({
   successMessage,
 }: {
   companyId: string;
-  target: { kind: "insurance"; policyId: string; vehicleId: string } | { kind: "rental"; rentalId: string };
+  target: { kind: "insurance" | "maintenance" | "fine" | "accident"; id: string; vehicleId: string } | { kind: "rental"; rentalId: string };
   docs: DocRow[];
   today: string;
   readOnly?: boolean;
@@ -36,7 +36,7 @@ export function LinkedDocuments({
 }) {
   const { t } = useI18n();
   const d = t.docsCenter;
-  const isIns = target.kind === "insurance";
+  const v = target.kind === "rental" ? null : target;
   return (
     <div className="space-y-4">
       {!readOnly && (
@@ -46,8 +46,8 @@ export function LinkedDocuments({
             title={buttonLabel}
             hint={d.hint}
             companyId={companyId}
-            entity={isIns ? "vehicles" : "rentals"}
-            entityId={isIns ? target.vehicleId : target.rentalId}
+            entity={v ? "vehicles" : "rentals"}
+            entityId={v ? v.vehicleId : target.kind === "rental" ? target.rentalId : ""}
             folder="documents"
             categoryLabel={d.category}
             categories={categories.map((c) => ({ value: c, label: d.categories[c] }))}
@@ -61,9 +61,12 @@ export function LinkedDocuments({
                 title: meta.title,
                 mime_type: file.mime,
                 size_bytes: file.size,
-                vehicle_id: isIns ? target.vehicleId : null,
-                rental_id: isIns ? null : target.rentalId,
-                insurance_policy_id: isIns ? target.policyId : null,
+                vehicle_id: v ? v.vehicleId : null,
+                rental_id: target.kind === "rental" ? target.rentalId : null,
+                insurance_policy_id: v?.kind === "insurance" ? v.id : null,
+                maintenance_id: v?.kind === "maintenance" ? v.id : null,
+                fine_id: v?.kind === "fine" ? v.id : null,
+                accident_id: v?.kind === "accident" ? v.id : null,
                 issued_at: meta.issued_at,
                 expires_at: meta.expires_at,
               })

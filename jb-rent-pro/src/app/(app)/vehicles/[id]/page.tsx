@@ -9,9 +9,17 @@ import { StartInspection } from "@/components/inspections/start-inspection";
 import { Button } from "@/components/ui/button";
 import { getI18n } from "@/lib/i18n/server";
 import { listPolicies } from "@/lib/insurance/queries";
+import { getMaintenanceFormOptions, listMaintenance, listPlans } from "@/lib/maintenance/queries";
+import { getRentalOptions, listAccidents, listFines } from "@/lib/fines/queries";
+import { RecordList } from "@/components/maintenance/record-list";
+import { PlanList } from "@/components/maintenance/plan-list";
+import { PlanDialog } from "@/components/maintenance/plan-dialog";
+import { MaintenanceDialog } from "@/components/maintenance/maintenance-dialog";
+import { AccidentList, FineList } from "@/components/fines/lists";
+import { FineDialog } from "@/components/fines/fine-dialog";
+import { AccidentDialog } from "@/components/fines/accident-dialog";
 import { PolicyList } from "@/components/insurance/policy-list";
 import { InsuranceDialog } from "@/components/insurance/insurance-dialog";
-import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
 import {
   getVehicle,
@@ -30,7 +38,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FlashToast } from "@/components/ui/flash-toast";
 import { InfoGrid } from "@/components/ui/info-grid";
-import { PhaseNotice } from "@/components/ui/phase-notice";
 import { TabsNav } from "@/components/ui/tabs-nav";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { ActivityList } from "@/components/activity/activity-list";
@@ -39,7 +46,7 @@ import { VehicleHeaderActions } from "@/components/vehicles/vehicle-header-actio
 import { PhotoGallery } from "@/components/vehicles/photo-gallery";
 import { VehicleDocuments } from "@/components/vehicles/vehicle-documents";
 
-const TABS = ["general", "rentals", "damages", "inspections", "maintenance", "insurance", "documents", "financial", "history"] as const;
+const TABS = ["general", "rentals", "damages", "inspections", "maintenance", "fines", "insurance", "documents", "financial", "history"] as const;
 type Tab = (typeof TABS)[number];
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -199,7 +206,8 @@ export default async function VehiclePage({
       {tab === "rentals" && <RentalsTab id={id} />}
       {tab === "damages" && <DamagesTab id={id} mileage={v.current_mileage} archived={!!v.archived_at} />}
       {tab === "inspections" && <InspectionsTab id={id} archived={!!v.archived_at} />}
-      {tab === "maintenance" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
+      {tab === "maintenance" && <MaintenanceTab id={id} archived={!!v.archived_at} />}
+      {tab === "fines" && <FinesTab id={id} archived={!!v.archived_at} />}
       {tab === "insurance" && <InsuranceTab id={id} archived={!!v.archived_at} />}
       {tab === "documents" && (
         <VehicleDocuments
@@ -281,6 +289,69 @@ async function InspectionsTab({ id, archived }: { id: string; archived: boolean 
         </div>
       )}
       {res.items.length === 0 ? <EmptyState icon={ClipboardCheck} title={t.inspections.empty} /> : <InspectionList items={res.items} showVehicle={false} />}
+    </div>
+  );
+}
+
+async function MaintenanceTab({ id, archived }: { id: string; archived: boolean }) {
+  const [{ t, locale }, agenda, history, plans, opts] = await Promise.all([
+    getI18n(),
+    listMaintenance({ view: "agenda", vehicleId: id }),
+    listMaintenance({ view: "history", vehicleId: id }),
+    listPlans(id),
+    getMaintenanceFormOptions(),
+  ]);
+  const today = todayInMadrid();
+  const m = t.maintenance;
+  const vPlans = opts.plans.filter((p) => p.vehicle_id === id);
+  const vehicle = opts.vehicles.filter((x) => x.value === id);
+  return (
+    <div className="space-y-6">
+      {!archived && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <PlanDialog values={{ vehicle_id: id, last_done_mileage: vehicle[0]?.mileage }} />
+          <MaintenanceDialog values={{ vehicle_id: id }} plans={vPlans} />
+        </div>
+      )}
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{m.tabs.plans}</h2>
+        {plans.length === 0 ? <p className="text-sm text-muted">{m.plans.empty}</p> : <PlanList rows={plans} showVehicle={false} readOnly={archived} />}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{m.tabs.agenda}</h2>
+        {agenda.items.length === 0 ? <p className="text-sm text-muted">{m.empty}</p> : <RecordList rows={agenda.items} t={t} locale={locale} today={today} showVehicle={false} />}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{m.tabs.history}</h2>
+        {history.items.length === 0 ? (
+          <p className="text-sm text-muted">{m.historyEmpty}</p>
+        ) : (
+          <RecordList rows={history.items} t={t} locale={locale} today={today} showVehicle={false} />
+        )}
+      </section>
+    </div>
+  );
+}
+
+async function FinesTab({ id, archived }: { id: string; archived: boolean }) {
+  const [{ t, locale }, fines, accidents, rentals] = await Promise.all([getI18n(), listFines({ vehicleId: id }), listAccidents({ vehicleId: id }), getRentalOptions()]);
+  const today = todayInMadrid();
+  return (
+    <div className="space-y-6">
+      {!archived && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <AccidentDialog values={{ vehicle_id: id }} rentals={rentals} />
+          <FineDialog values={{ vehicle_id: id }} rentals={rentals} />
+        </div>
+      )}
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{t.fines.tabs.fines}</h2>
+        {fines.length === 0 ? <p className="text-sm text-muted">{t.fines.empty}</p> : <FineList rows={fines} t={t} locale={locale} today={today} showVehicle={false} />}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-display text-sm font-semibold text-gold-light">{t.fines.tabs.accidents}</h2>
+        {accidents.length === 0 ? <p className="text-sm text-muted">{t.accidents.empty}</p> : <AccidentList rows={accidents} t={t} locale={locale} showVehicle={false} />}
+      </section>
     </div>
   );
 }

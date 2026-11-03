@@ -54,6 +54,7 @@ export const damageSchema = z.object({
   vehicle_id: id,
   rental_id: z.preprocess(blankToNull, id.nullable()),
   inspection_id: z.preprocess(blankToNull, id.nullable()),
+  accident_id: z.preprocess((v) => (v === "" || v === undefined ? null : v), id.nullable()),
   detected_at: optionalDate.transform((v) => v ?? undefined),
   mileage: optionalInt(0, 9_999_999),
   area: z.preprocess(blankToNull, z.enum(INSPECTION_AREAS).nullable()),

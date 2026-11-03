@@ -19,7 +19,15 @@ function alertHref(a: DashboardAlert): string | null {
     case "rentals":
       return `/rentals/${a.entity_id}`;
     case "vehicles":
-      return a.kind === "vehicle_uninsured" ? `/vehicles/${a.entity_id}?tab=insurance` : `/vehicles/${a.entity_id}`;
+      if (a.kind === "vehicle_uninsured") return `/vehicles/${a.entity_id}?tab=insurance`;
+      if (a.kind === "maintenance_due" || a.kind === "maintenance_overdue") return `/vehicles/${a.entity_id}?tab=maintenance`;
+      return `/vehicles/${a.entity_id}`;
+    case "maintenance_records":
+      return `/maintenance/${a.entity_id}`;
+    case "traffic_fines":
+      return `/fines/${a.entity_id}`;
+    case "accidents":
+      return `/fines/accidents/${a.entity_id}`;
     case "insurance_policies":
       return `/insurance/${a.entity_id}`;
     case "documents":

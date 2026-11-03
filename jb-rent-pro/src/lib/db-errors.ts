@@ -20,6 +20,12 @@ export function mapDbError(err: { code?: string; message?: string } | null | und
   if (msg.includes("INSPECTION_DATA_REQUIRED")) return "inspectionDataRequired";
   if (msg.includes("DAMAGE_RENTAL_MISMATCH")) return "damageRentalMismatch";
   if (msg.includes("RENEWAL_MISMATCH")) return "renewalMismatch";
+  if (msg.includes("VEHICLE_BUSY")) return "vehicleBusy";
+  if (msg.includes("MAINTENANCE_LOCKED")) return "maintenanceLocked";
+  if (msg.includes("MAINTENANCE_DATA_REQUIRED")) return "maintenanceDataRequired";
+  if (msg.includes("MAINTENANCE_LINK_MISMATCH")) return "linkMismatch";
+  if (msg.includes("FINE_NO_DRIVER") || msg.includes("ACCIDENT_NO_CUSTOMER")) return "customerRequired";
+  if (msg.includes("FINE_RENTAL_MISMATCH") || msg.includes("ACCIDENT_RENTAL_MISMATCH") || msg.includes("ACCIDENT_POLICY_MISMATCH")) return "linkMismatch";
   if (msg.includes("CUSTOMER_HAS_ACTIVE_RENTALS")) return "customerHasActiveRentals";
   switch (err.code) {
     case "42501":

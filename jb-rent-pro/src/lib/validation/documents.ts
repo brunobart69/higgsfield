@@ -11,6 +11,9 @@ export const DOCUMENT_CATEGORIES = [
   "invoice",
   "receipt",
   "inspection",
+  "maintenance_invoice",
+  "fine_notice",
+  "accident_report",
   "other",
 ] as const;
 
@@ -26,6 +29,9 @@ export const documentSchema = z.object({
   vehicle_id: z.preprocess(blankToNull, z.guid().nullable()),
   rental_id: z.preprocess(blankToNull, z.guid().nullable()),
   insurance_policy_id: z.preprocess(blankToNull, z.guid().nullable()),
+  maintenance_id: z.preprocess(blankToNull, z.guid().nullable()),
+  fine_id: z.preprocess(blankToNull, z.guid().nullable()),
+  accident_id: z.preprocess(blankToNull, z.guid().nullable()),
   issued_at: optionalDate,
   expires_at: optionalDate,
   notes: optionalText(2000),

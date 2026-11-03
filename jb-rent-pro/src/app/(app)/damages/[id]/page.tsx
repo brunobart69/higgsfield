@@ -15,6 +15,10 @@ import { InfoGrid } from "@/components/ui/info-grid";
 import { ActivityList } from "@/components/activity/activity-list";
 import { DamageDialog } from "@/components/inspections/damage-dialog";
 import { DamagePhotos } from "@/components/inspections/damage-photos";
+import { MaintenanceDialog } from "@/components/maintenance/maintenance-dialog";
+import { RecordList } from "@/components/maintenance/record-list";
+import { listMaintenance } from "@/lib/maintenance/queries";
+import { todayInMadrid } from "@/lib/periods";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getI18n();
@@ -25,7 +29,9 @@ export default async function DamagePage({ params }: { params: Promise<{ id: str
   const [{ t, locale }, { id }, session] = await Promise.all([getI18n(), params, getSession()]);
   const d = await getDamage(id);
   if (!d || session.status !== "ok") notFound();
-  const [history, users] = await Promise.all([listEntityHistory(["damages"], id, 30), listCompanyUsers()]);
+  const [history, users, repairs] = await Promise.all([listEntityHistory(["damages"], id, 30), listCompanyUsers(), listMaintenance({ view: "all", damageId: id })]);
+  const today = todayInMadrid();
+  const openRepair = repairs.items.some((x) => x.status === "scheduled" || x.status === "in_progress");
   const names = users.ok ? Object.fromEntries(users.users.map((u) => [u.id, u.fullName ?? u.email])) : {};
   const dt = t.damages;
   const f = dt.fields;
@@ -47,7 +53,22 @@ export default async function DamagePage({ params }: { params: Promise<{ id: str
           </h1>
           <p className="text-sm text-muted">{d.description}</p>
         </div>
-        <DamageDialog trigger="edit" values={{ ...d, vehicle_id: d.vehicle_id }} />
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <DamageDialog trigger="edit" values={{ ...d, vehicle_id: d.vehicle_id }} />
+          {d.status !== "resolved" && !openRepair && (
+            <MaintenanceDialog
+              label={t.maintenance.scheduleRepair}
+              values={{
+                vehicle_id: d.vehicle_id,
+                damage_id: d.id,
+                maintenance_type: d.category === "mechanical" || d.category === "electrical" ? "repair" : d.category === "tyres" ? "tyres" : "bodywork",
+                title: `${dt.categories[d.category]}${d.area ? ` · ${t.inspections.areas[d.area as InspectionArea]}` : ""}`,
+                cost: d.estimated_cost,
+                workshop: d.repair_shop,
+              }}
+            />
+          )}
+        </div>
       </div>
 
       <Card>
@@ -59,6 +80,7 @@ export default async function DamagePage({ params }: { params: Promise<{ id: str
               { label: f.mileage, value: d.mileage !== null && formatNumber(d.mileage, locale) },
               { label: f.rental, value: d.rental_id && <Link className="hover:underline" href={`/rentals/${d.rental_id}`}>{d.contract}</Link> },
               { label: f.customer, value: d.customer_id && <Link className="hover:underline" href={`/customers/${d.customer_id}`}>{d.customer}</Link> },
+              { label: t.fines.tabs.accidents, value: d.accident_id && <Link className="hover:underline" href={`/fines/accidents/${d.accident_id}`}>{t.common.view}</Link> },
               { label: f.inspection, value: d.inspection_id && <Link className="hover:underline" href={`/inspections/${d.inspection_id}`}>{t.common.view}</Link> },
               { label: f.estimated_cost, value: d.estimated_cost !== null && formatCurrency(d.estimated_cost, locale) },
               { label: f.actual_cost, value: d.actual_cost !== null && formatCurrency(d.actual_cost, locale) },
@@ -78,6 +100,13 @@ export default async function DamagePage({ params }: { params: Promise<{ id: str
           <DamagePhotos damageId={d.id} vehicleId={d.vehicle_id} companyId={session.profile.companyId} photos={d.photos} />
         </CardContent>
       </Card>
+
+      {repairs.items.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="font-display text-sm font-semibold text-gold-light">{t.maintenance.linkedDamage}</h2>
+          <RecordList rows={repairs.items} t={t} locale={locale} today={today} showVehicle={false} />
+        </section>
+      )}
 
       {history.length > 0 && (
         <Card>

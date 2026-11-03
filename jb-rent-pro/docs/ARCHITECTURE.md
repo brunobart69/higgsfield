@@ -250,6 +250,29 @@ O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
   `signature_status = 'signed'` (assinatura manuscrita digitalizada; assinatura eletrônica
   qualificada fica para integração futura).
 
+### 3.10 Manutenção, multas e sinistros (migrations 0007a e 0007)
+
+- **0007a** só adiciona valores de enum (categorias `repairs`, `fines`, `fine_recharge`,
+  `damage_recovery` e documentos `maintenance_invoice`, `fine_notice`, `accident_report`) — fica em
+  arquivo separado porque o PostgreSQL só permite usar valores novos depois do commit.
+- **Lançamentos automáticos** usam `financial_transactions.source_ref` (ex.: `maintenance:<id>`,
+  `fine:<id>:expense`, `fine:<id>:recharge`, `accident:<id>:deductible`, `accident:<id>:payout`),
+  com índice único: um lançamento por origem, atualizado ou anulado conforme o registro muda.
+- **Planos** (`maintenance_plans`): intervalo em km e/ou meses a partir do último serviço;
+  `maintenance_due()` calcula próximo serviço e situação (em breve = até 30 dias ou 1.000 km).
+- **Ordens** (`maintenance_records`): agendada → na oficina → concluída/cancelada. Na oficina, o
+  veículo fica "Em manutenção" (bloqueia reservas; não é possível se estiver alugado —
+  `VEHICLE_BUSY`). Concluída: atualiza km do veículo e o plano, resolve a avaria ligada (custo real e
+  oficina) e lança a despesa (pneus/ITV/limpeza/reparos/manutenção) na data de conclusão. Depois de
+  concluída, só pagamento, fatura e observações mudam. Cancelar exige motivo. Nada é excluído.
+- **Multas** (`traffic_fines`): contrato e cliente são identificados pela data/hora da infração
+  (`app.rental_at`); "condutor identificado" exige cliente. Paga pela empresa → despesa "Multas";
+  valor cobrado do cliente → receita "Repasse de multas". Prazos geram alertas (7 dias).
+- **Sinistros** (`accidents`): contrato, cliente e apólice vigente identificados automaticamente;
+  fotos (`accident_photos`), avarias ligadas (`damages.accident_id`) e documentos. Franquia cobrada
+  do cliente e indenização recebida → "Recuperação de danos". Alerta enquanto não for comunicado à
+  seguradora. Os prazos legais e contratuais não são presumidos: constam nas notificações e na apólice.
+
 ## 4. Fluxo de autenticação
 
 ```
@@ -318,7 +341,7 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 4 | Reservas/contratos com cálculo no banco, disponibilidade, extras, entrega/devolução, km excedente, pagamentos e estornos, cauções, integração com financeiro, contrato em PDF PT/ES | ✅ concluída |
 | 5 | Inspeções de entrega/devolução/periódicas com checklist e fotos, comparação, avarias com fotos e custos, relatórios PDF | ✅ concluída |
 | 6 | Seguros (renovações, alertas 30/15/7, prêmio como despesa, veículos sem seguro) e central de documentos (vínculos, retenção, contrato assinado) | ✅ concluída |
-| 7 | Manutenção (alertas por data/km), multas, sinistros | próxima |
-| 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | |
+| 7 | Manutenção (planos por data/km, oficina, custos), multas (identificação do condutor, repasse) e sinistros (franquia, indenização) | ✅ concluída |
+| 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | próxima |
 | 9 | Calendário inteligente, notificações, área do cliente | |
 | 10 | Relatórios CSV/PDF, testes E2E, revisão de segurança, publicação | |

@@ -54,7 +54,13 @@ export type AlertKind =
   | "payment_overdue"
   | "deposit_pending"
   | "damage_open"
-  | "vehicle_uninsured";
+  | "vehicle_uninsured"
+  | "maintenance_overdue"
+  | "maintenance_due"
+  | "maintenance_scheduled"
+  | "fine_identification_due"
+  | "fine_payment_due"
+  | "accident_unreported";
 
 export type AlertSeverity = "critical" | "high" | "medium" | "low" | "info";
 

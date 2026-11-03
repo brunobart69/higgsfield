@@ -18,6 +18,10 @@ import { DepositPanel } from "@/components/rentals/deposit-panel";
 import { RentalInspectionsCard } from "@/components/inspections/rental-inspections-card";
 import { Badge } from "@/components/ui/badge";
 import { LinkedDocuments } from "@/components/documents/linked-documents";
+import { listAccidents, listFines } from "@/lib/fines/queries";
+import { AccidentList, FineList } from "@/components/fines/lists";
+import { FineDialog } from "@/components/fines/fine-dialog";
+import { AccidentDialog } from "@/components/fines/accident-dialog";
 import { getSession } from "@/lib/auth/session";
 import { listLinkedDocuments } from "@/lib/documents/queries";
 import { todayInMadrid } from "@/lib/periods";
@@ -38,10 +42,12 @@ export default async function RentalPage({ params, searchParams }: { params: Pro
     getSession(),
     listLinkedDocuments({ rentalId: id }),
   ]);
+  const [fines, accidents] = r.status === "reservation" || r.status === "confirmed" ? [[], []] : await Promise.all([listFines({ rentalId: id }), listAccidents({ rentalId: id })]);
   const names = users.ok ? Object.fromEntries(users.users.map((u) => [u.id, u.fullName ?? u.email])) : {};
   const rt = t.rentals;
   const c = r.customer;
   const customerName = (c.customer_type === "company" ? c.company_name : c.full_name) ?? "—";
+  const rentalOpt = [{ value: r.id, vehicle_id: r.vehicle_id, label: `${r.contract_number} · ${customerName}` }];
   const driven = r.end_mileage !== null && r.start_mileage !== null ? r.end_mileage - r.start_mileage : null;
   const pct = (n: number | null) => (n === null ? null : `${n} %`);
 
@@ -195,6 +201,24 @@ export default async function RentalPage({ params, searchParams }: { params: Pro
               />
             </CardContent>
           </Card>
+
+          {(r.status === "in_progress" || r.status === "late" || r.status === "completed" || fines.length > 0 || accidents.length > 0) && (
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                <CardTitle>{t.fines.title}</CardTitle>
+                <div className="flex flex-wrap gap-2">
+                  <FineDialog size="sm" values={{ vehicle_id: r.vehicle_id, rental_id: r.id }} rentals={rentalOpt} />
+                  <AccidentDialog size="sm" values={{ vehicle_id: r.vehicle_id, rental_id: r.id }} rentals={rentalOpt} />
+                </div>
+              </CardHeader>
+              {(fines.length > 0 || accidents.length > 0) && (
+                <CardContent className="space-y-3">
+                  {fines.length > 0 && <FineList rows={fines} t={t} locale={locale} today={todayInMadrid()} showVehicle={false} />}
+                  {accidents.length > 0 && <AccidentList rows={accidents} t={t} locale={locale} showVehicle={false} />}
+                </CardContent>
+              )}
+            </Card>
+          )}
 
           {history.length > 0 && (
             <Card>

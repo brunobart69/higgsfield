@@ -49,5 +49,8 @@ npm run dev
 - **Fase 6 ✅** — seguros (apólices, renovações encadeadas, alertas 30/15/7, veículos sem seguro,
   prêmio lançado como despesa) e central de documentos (empresa, frota, contratos e clientes,
   vínculos, retenção configurável, contrato assinado digitalizado).
+- **Fase 7 ✅** — manutenção (planos por data/km, agenda da oficina, custos lançados no financeiro,
+  reparo de avarias), multas (identificação automática do contrato/condutor, prazos, repasse ao
+  cliente) e sinistros (fotos, avarias, apólice, franquia e indenização).
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.
