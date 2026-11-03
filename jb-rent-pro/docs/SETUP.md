@@ -42,24 +42,23 @@ Todas ficam em **Supabase → Project Settings → API / API Keys**.
      ```
      {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&next=/reset-password
      ```
+     O convidado abre o link e define a própria senha.
    - **Magic Link** (área do cliente — o cliente entra com o **código** do e-mail; o link também funciona):
      ```
      Seu código de acesso: {{ .Token }}
-     Ou entre pelo link: {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink&next=/portal
+     Ou entre pelo link: {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/portal
      ```
      O mesmo endereço `https://SEU-DOMINIO/auth/confirm` já está nas *Redirect URLs*. A ativação do acesso
      de cada cliente (ficha do cliente → Área do cliente) usa a `SUPABASE_SERVICE_ROLE_KEY` já configurada.
      Para volume real de e-mails, configure um SMTP próprio em *Authentication → SMTP Settings* (o envio
      padrão do Supabase tem limite baixo por hora).
-     O convidado abre o link e define a própria senha.
-5. Aplique as migrations **em ordem** — escolha uma opção:
-   - **SQL Editor**: execute, nesta ordem, os arquivos de `supabase/migrations/`
-     (`20261103000001_core_schema.sql`, `20261104000001_users_settings.sql`,
-     `20261105000001_vehicles_customers.sql`, `20261106000001_rentals.sql`, `20261107000001_inspections_damages.sql`,
-     `20261108000001_insurance_documents.sql`, `20261109000001_finance_categories.sql`,
-     `20261109000002_maintenance_fines_accidents.sql`, `20261110000001_finance_enums.sql`,
-     `20261110000002_finance.sql`, `20261111000001_calendar_notifications_portal.sql`,
-     `20261112000001_hardening.sql`); ou
+5. Aplique o banco — escolha uma opção:
+   - **SQL Editor (mais simples)**: abra *SQL Editor → New query*, cole o conteúdo de
+     `supabase/deploy/1_install.sql` e clique em **Run**; repita com `2_install.sql` e `3_install.sql`
+     (nessa ordem, um de cada vez — os lotes contêm as 12 migrations de `supabase/migrations`). Depois rode
+     `supabase/deploy/verify.sql`: todas as linhas devem mostrar `true` (a última só depois do passo 6).
+   - **SQL Editor, arquivo por arquivo**: execute, nesta ordem, os arquivos de `supabase/migrations/`
+     (`20261103000001_core_schema.sql` … `20261112000001_hardening.sql`); ou
    - **CLI**: `npx supabase login && npx supabase link --project-ref SEU_REF && npx supabase db push`.
 6. Crie o **administrador principal**: *Authentication → Users → Add user → Create new user* (e‑mail +
    senha, marque *Auto Confirm*). O primeiro usuário vira automaticamente "Administrador principal" e cria
