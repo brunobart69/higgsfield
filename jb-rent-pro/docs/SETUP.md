@@ -45,7 +45,8 @@ Todas ficam em **Supabase → Project Settings → API / API Keys**.
      O convidado abre o link e define a própria senha.
 5. Aplique as migrations **em ordem** — escolha uma opção:
    - **SQL Editor**: execute, nesta ordem, os arquivos de `supabase/migrations/`
-     (`20261103000001_core_schema.sql`, `20261104000001_users_settings.sql`); ou
+     (`20261103000001_core_schema.sql`, `20261104000001_users_settings.sql`,
+     `20261105000001_vehicles_customers.sql`); ou
    - **CLI**: `npx supabase login && npx supabase link --project-ref SEU_REF && npx supabase db push`.
 6. Crie o **administrador principal**: *Authentication → Users → Add user → Create new user* (e‑mail +
    senha, marque *Auto Confirm*). O primeiro usuário vira automaticamente "Administrador principal" e cria

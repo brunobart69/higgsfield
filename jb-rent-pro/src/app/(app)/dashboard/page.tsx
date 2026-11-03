@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   CalendarClock,
   Car,
@@ -83,9 +86,16 @@ export default async function DashboardPage({
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-gold/15 text-gold">
                   <Sparkles className="size-5" />
                 </span>
-                <div>
-                  <p className="font-medium">{t.dashboard.empty.title}</p>
-                  <p className="mt-1 text-sm text-muted">{t.dashboard.empty.body}</p>
+                <div className="space-y-3">
+                  <div>
+                    <p className="font-medium">{t.dashboard.empty.title}</p>
+                    <p className="mt-1 text-sm text-muted">{t.dashboard.empty.body}</p>
+                  </div>
+                  <Button asChild size="sm">
+                    <Link href="/vehicles/new">
+                      <Plus /> {t.vehicles.new}
+                    </Link>
+                  </Button>
                 </div>
               </CardContent>
             </Card>

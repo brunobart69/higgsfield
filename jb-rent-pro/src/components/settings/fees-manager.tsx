@@ -14,7 +14,7 @@ import { errorText } from "@/lib/i18n/errors";
 import { formatCurrency } from "@/lib/format";
 import type { Fee } from "@/lib/settings/queries";
 import { deleteFeeAction, saveFeeAction } from "@/app/(app)/settings/actions";
-import { ActionForm, useFieldError } from "./action-form";
+import { ActionForm, useFieldError } from "@/components/ui/action-form";
 import { moneyInput } from "./settings-forms";
 
 function FeeFields({ fee }: { fee?: Fee }) {

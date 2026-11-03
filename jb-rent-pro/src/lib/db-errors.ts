@@ -6,6 +6,8 @@ export function mapDbError(err: { code?: string; message?: string } | null | und
   if (msg.includes("cannot deactivate yourself") || msg.includes("cannot demote itself")) return "cannotChangeSelf";
   if (msg.includes("HARD_DELETE_FORBIDDEN")) return "hardDeleteForbidden";
   if (msg.includes("VEHICLE_NOT_RENTABLE")) return "vehicleNotRentable";
+  if (msg.includes("MILEAGE_DECREASE")) return "mileageDecrease";
+  if (msg.includes("CUSTOMER_HAS_ACTIVE_RENTALS")) return "customerHasActiveRentals";
   switch (err.code) {
     case "42501":
       return "forbidden";

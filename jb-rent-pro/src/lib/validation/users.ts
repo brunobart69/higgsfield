@@ -9,11 +9,11 @@ export const inviteSchema = z.object({
 });
 
 export const roleSchema = z.object({
-  user_id: z.uuid("invalid"),
+  user_id: z.guid("invalid"),
   role: z.enum(["owner", "admin"]),
 });
 
-export const userIdSchema = z.object({ user_id: z.uuid("invalid") });
+export const userIdSchema = z.object({ user_id: z.guid("invalid") });
 
 export const profileSchema = z.object({
   full_name: z.string().trim().min(2, "required").max(120, "tooLong"),

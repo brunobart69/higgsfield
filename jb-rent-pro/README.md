@@ -40,5 +40,7 @@ npm run dev
 - **Fase 2 ✅** — usuários e convites, cargos e permissões, desativação com encerramento de sessões,
   configurações da empresa (dados, fiscal, preços padrão, contrato, taxas adicionais, logotipo),
   perfil próprio, histórico de acessos e registro de atividades com diferenças antes/depois.
+- **Fase 3 ✅** — veículos (ficha com abas, fotos, documentos, status, arquivamento, histórico de valor),
+  clientes pessoa física e jurídica (DNI/NIE validado, documentos pessoais, anonimização RGPD) e busca global.
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.

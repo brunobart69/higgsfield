@@ -10,6 +10,8 @@ export const ACTIVITY_ACTIONS = [
   "user.password_link",
   "user.sessions_revoked",
   "company.logo_updated",
+  "customer.anonymized",
+  "file.downloaded",
 ] as const;
 
 export type ActivityEntry = {

@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useI18n } from "@/lib/i18n/provider";
 import { errorText } from "@/lib/i18n/errors";
 import { removeLogoAction, uploadLogoAction } from "@/app/(app)/settings/actions";
-import { ActionForm, useFieldError } from "./action-form";
+import { ActionForm, useFieldError } from "@/components/ui/action-form";
 
 function FileInput() {
   const { t } = useI18n();

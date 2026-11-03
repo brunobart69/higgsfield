@@ -74,7 +74,7 @@ export const contractSchema = z.object({
 });
 
 export const feeSchema = z.object({
-  id: z.uuid().optional().or(z.literal("").transform(() => undefined)),
+  id: z.guid().optional().or(z.literal("").transform(() => undefined)),
   name_pt: z.string().trim().min(1, "required").max(120, "tooLong"),
   name_es: z.string().trim().min(1, "required").max(120, "tooLong"),
   amount: requiredMoney(99_999.99),

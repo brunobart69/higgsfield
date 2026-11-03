@@ -11,7 +11,7 @@ import {
   saveDefaultsAction,
   saveFiscalAction,
 } from "@/app/(app)/settings/actions";
-import { ActionForm, useFieldError } from "./action-form";
+import { ActionForm, useFieldError } from "@/components/ui/action-form";
 
 /** Número do banco → texto editável com vírgula decimal ("45,00"). */
 export function moneyInput(v: number | null | undefined) {

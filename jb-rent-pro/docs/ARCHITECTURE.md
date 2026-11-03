@@ -98,8 +98,8 @@ Futuros módulos seguem o mesmo padrão: `src/app/(app)/<modulo>/` (páginas + `
 | ✅ `financial_transactions` | 1 (UI na 8) | Receitas/despesas, competência e caixa, comprovante |
 | ✅ `fee_catalog` | 2 | Catálogo de taxas adicionais (por aluguel / por dia, IVA opcional) |
 | ✅ `branches` | 2 (UI futura) | Filiais — estrutura preparada para expansão |
-| `vehicle_photos` | 3 | Fotos (principal, externas, internas, detalhes) |
-| `customer_documents` | 3 | Documentos pessoais (DNI/NIE, carta de condução) com acesso restrito |
+| ✅ `vehicle_photos` | 3 | Fotos (principal, externas, internas, detalhes); uma única principal por veículo |
+| ✅ `customer_documents` | 3 | Documentos pessoais (DNI/NIE, carteira, comprovantes) — exclusão só pelo adm. principal |
 | `rental_payments` | 4 | Pagamentos parciais do contrato → saldo pendente |
 | `deposits` | 4 | Cauções: recebido, devolvido, retenções, motivo |
 | `inspections` / `inspection_items` | 5 | Inspeção de entrega e devolução, comparação |
@@ -143,6 +143,10 @@ não é possível apagar um veículo ou cliente que tenha histórico — arquiva
 | Sempre há ao menos um administrador principal ativo | trigger `app.ensure_active_owner` |
 | Perfil de convidado criado só quando o servidor define empresa/cargo em `app_metadata` | trigger `app.handle_user_app_metadata` em `auth.users` |
 | Eventos administrativos (convite, link de senha, sessões encerradas, logotipo) com autor | RPC `log_event` (lista fechada de ações) |
+| Matrícula, VIN, DNI/NIE, CIF e e-mail normalizados; documento e CIF únicos por empresa | triggers `app.normalize_vehicle` / `app.normalize_customer` + índices únicos |
+| Quilometragem não diminui (só o adm. principal corrige) | trigger `app.normalize_vehicle` |
+| Arquivos sempre na pasta `<empresa>/<entidade>/<id>/…` | `CHECK` em `vehicle_photos`, `customer_documents` e `documents` |
+| RGPD: anonimização apaga dados pessoais, documentos e os dados pessoais guardados no histórico | RPC `anonymize_customer` (só adm. principal, sem contratos ativos) |
 
 ### 3.4 RLS (Row Level Security)
 
@@ -156,7 +160,9 @@ do usuário autenticado (apenas se `is_active`). Políticas:
 | `fee_catalog`, `branches` | equipe da empresa | adm. principal | adm. principal | adm. principal |
 | `activity_logs` | adm. principal: tudo · admin: só as próprias ações | — (só triggers) | — | — |
 | operacionais | equipe da empresa | equipe da empresa | equipe da empresa | adm. principal |
-| `storage.objects` (bucket `documents`) | pasta `<company_id>/…` | idem | idem | adm. principal |
+| `vehicle_photos` | equipe | equipe | equipe | equipe (gestão de veículos) |
+| `customer_documents` | equipe | equipe | equipe | adm. principal |
+| `storage.objects` (bucket `documents`) | pasta `<company_id>/…` | idem | idem | adm. principal; equipe na pasta `vehicles/`; quem enviou pode desfazer o próprio envio |
 
 `anon` não tem nenhum privilégio. Testado em `supabase/tests/001_core_test.sql`.
 
@@ -171,6 +177,19 @@ do usuário autenticado (apenas se `is_active`). Políticas:
 
 **Fórmulas** — Ocupação = dias alugados ÷ dias em que o veículo esteve na frota × 100 (dias civis em
 Europe/Madrid, devolução exclusiva). ROI (fase 8) = resultado acumulado ÷ investimento inicial × 100.
+
+### 3.6 Envio de arquivos
+
+```
+Navegador ─ reduz fotos para ≤ 2000 px (JPEG) ─► upload direto ao Storage privado (RLS da pasta da empresa)
+          ─► Server Action register…() ─► confere prefixo do caminho + lê os primeiros bytes (Range)
+               tipo real ∈ {PDF, JPG, PNG} e ≤ 15 MB? ── não ─► apaga o arquivo e mostra o erro
+               sim ─► grava os metadados (RLS) ─► auditoria
+Abrir/baixar ─► /api/files/<tipo>/<id> ─► RLS confirma o acesso ─► link assinado de 60 s
+               (documentos pessoais: cada abertura registrada em activity_logs)
+```
+
+O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
 
 ## 4. Fluxo de autenticação
 
@@ -236,8 +255,8 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 |---|---|---|
 | 1 | Identidade visual, estrutura, login, recuperação/alteração de senha, dashboard real, PWA, i18n, núcleo do banco com RLS | ✅ concluída |
 | 2 | Usuários (convite, cargos, desativação, link de senha), configurações da empresa (dados, fiscal, preços padrão, contrato, taxas, logotipo), perfil próprio, histórico de acessos e registro de atividades | ✅ concluída |
-| 3 | Veículos (ficha com abas, fotos, busca) e clientes (PF/PJ, documentos, busca, RGPD) | próxima |
-| 4 | Reservas/contratos, cálculos, pagamentos, cauções, quilometragem, PDF PT/ES | |
+| 3 | Veículos (ficha com 9 abas, fotos, documentos, busca, arquivamento, histórico de valor) e clientes (PF/PJ, DNI/NIE validado, documentos pessoais, histórico, RGPD/anonimização), busca global | ✅ concluída |
+| 4 | Reservas/contratos, cálculos, pagamentos, cauções, quilometragem, PDF PT/ES | próxima |
 | 5 | Inspeções de entrega/devolução, comparação, avarias com fotos, PDF | |
 | 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | |
 | 7 | Manutenção (alertas por data/km), multas, sinistros | |

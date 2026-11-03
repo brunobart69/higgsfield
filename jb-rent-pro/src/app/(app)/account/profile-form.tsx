@@ -1,6 +1,6 @@
 "use client";
 import { SelectField, TextField } from "@/components/ui/field";
-import { ActionForm, useFieldError } from "@/components/settings/action-form";
+import { ActionForm, useFieldError } from "@/components/ui/action-form";
 import { useI18n } from "@/lib/i18n/provider";
 import { LOCALES, LOCALE_LABELS } from "@/lib/i18n/config";
 import { updateProfileAction } from "./actions";

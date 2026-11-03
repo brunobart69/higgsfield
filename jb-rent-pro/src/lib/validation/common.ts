@@ -140,4 +140,38 @@ export function ibanChecksumOk(iban: string): boolean {
   return remainder === 1;
 }
 
-export const uuidSchema = z.uuid("invalid");
+export const uuidSchema = z.guid("invalid");
+
+const DNI_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE";
+
+/** Letra de controle do DNI/NIE (algoritmo oficial módulo 23). */
+export function spanishIdChecksumOk(value: string): boolean {
+  const v = value.toUpperCase().replace(/[\s.-]/g, "");
+  const m = /^([XYZ]?)(\d{7,8})([A-Z])$/.exec(v);
+  if (!m) return false;
+  const [, prefix, digits, letter] = m;
+  if (prefix && digits!.length !== 7) return false;
+  if (!prefix && digits!.length !== 8) return false;
+  const num = Number((prefix ? String("XYZ".indexOf(prefix)) : "") + digits);
+  return DNI_LETTERS[num % 23] === letter;
+}
+
+/** Data opcional "YYYY-MM-DD" (campo type=date). */
+export const optionalDate = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    const d = new Date(`${v}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) {
+      ctx.addIssue({ code: "custom", message: "invalidDate" });
+      return z.NEVER;
+    }
+    return v;
+  });
+
+export const checkbox = z
+  .string()
+  .optional()
+  .transform((v) => v === "on" || v === "true");

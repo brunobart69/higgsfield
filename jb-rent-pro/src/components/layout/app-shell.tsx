@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Bell, Gauge, Menu, UserRound } from "lucide-react";
+import { Bell, CarFront, Gauge, Menu, Users } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useI18n } from "@/lib/i18n/provider";
@@ -11,6 +11,7 @@ import type { CurrentProfile } from "@/lib/auth/session";
 import { SidebarNav } from "./sidebar-nav";
 import { LocaleSwitcher } from "./locale-switcher";
 import { UserMenu } from "./user-menu";
+import { GlobalSearch } from "./global-search";
 
 export function AppShell({
   profile,
@@ -27,8 +28,8 @@ export function AppShell({
 
   const bottomItems = [
     { href: "/dashboard", label: t.nav.dashboard, icon: Gauge, active: pathname === "/dashboard" },
-    { href: "/dashboard#alerts", label: t.nav.alerts, icon: Bell, active: false, badge: alertCount },
-    { href: "/account", label: t.nav.account, icon: UserRound, active: pathname.startsWith("/account") },
+    { href: "/vehicles", label: t.nav.vehicles, icon: CarFront, active: pathname.startsWith("/vehicles") },
+    { href: "/customers", label: t.nav.customers, icon: Users, active: pathname.startsWith("/customers") },
   ];
 
   return (
@@ -55,10 +56,12 @@ export function AppShell({
           <Link href="/dashboard" className="lg:hidden" aria-label="JB RENT PRO">
             <Logo compact />
           </Link>
-          <div className="flex-1" />
+          <div className="flex flex-1 justify-end md:justify-start md:pl-2">
+            <GlobalSearch />
+          </div>
           <Link
             href="/dashboard#alerts"
-            className="relative hidden size-9 items-center justify-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground sm:flex"
+            className="relative flex size-9 items-center justify-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground"
             aria-label={`${t.nav.alerts}: ${alertCount}`}
           >
             <Bell className="size-4" />
@@ -94,11 +97,6 @@ export function AppShell({
                 >
                   <Icon className="size-5" />
                   {item.label}
-                  {!!item.badge && (
-                    <span className="absolute left-1/2 top-2 ml-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 text-[0.6rem] font-bold text-gold-foreground tabular">
-                      {item.badge > 99 ? "99+" : item.badge}
-                    </span>
-                  )}
                 </Link>
               </li>
             );
