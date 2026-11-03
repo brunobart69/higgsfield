@@ -60,7 +60,7 @@ export function AppShell({
             <GlobalSearch />
           </div>
           <Link
-            href="/dashboard#alerts"
+            href="/notifications"
             className="relative flex size-9 items-center justify-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground"
             aria-label={`${t.nav.alerts}: ${alertCount}`}
           >

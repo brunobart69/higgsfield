@@ -48,9 +48,11 @@ export type Fee = {
 const COMPANY_COLUMNS =
   "id, name, legal_name, tax_id, address, city, postal_code, province, phone, email, website, logo_path, default_locale, currency, timezone, vat_rate, prices_include_vat, iban, fiscal_notes, document_retention_years, default_daily_price, default_weekly_price, default_monthly_price, default_deposit_amount, default_mileage_policy, default_mileage_limit_km, default_excess_km_price, rental_grace_minutes, rental_conditions_pt, rental_conditions_es, contract_footer";
 
-export async function getCompanySettings(): Promise<CompanySettings | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("companies").select(COMPANY_COLUMNS).maybeSingle();
+export async function getCompanySettings(opts?: { client: Awaited<ReturnType<typeof createClient>>; companyId: string }): Promise<CompanySettings | null> {
+  const supabase = opts?.client ?? (await createClient());
+  let q = supabase.from("companies").select(COMPANY_COLUMNS);
+  if (opts) q = q.eq("id", opts.companyId);
+  const { data, error } = await q.maybeSingle();
   if (error) {
     console.error("[settings] load failed", error.code, error.message);
     return null;

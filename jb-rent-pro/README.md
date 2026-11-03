@@ -55,5 +55,8 @@ npm run dev
 - **Fase 8 ✅** — financeiro completo (resultado por competência ou caixa, lançamentos manuais e
   parcelas, contas a pagar e receber, fluxo de caixa com saldo e previsão) e patrimônio (valor da
   frota, ROI e recuperação por veículo, venda de veículos).
+- **Fase 9 ✅** — calendário (mês, linha do tempo da frota e busca de disponibilidade), notificações
+  persistentes com leitura por usuário e área do cliente (acesso por código no e-mail: reservas,
+  pagamentos, cauções, contrato em PDF, documentos, multas e solicitação de reserva).
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.

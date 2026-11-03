@@ -5,7 +5,9 @@ import { SUPABASE_URL } from "@/lib/env";
 /**
  * Cliente com a chave service_role. IGNORA A RLS — usar somente em Server
  * Actions que já verificaram que o usuário é administrador principal, e
- * apenas para operações do Auth Admin (convites, bloqueio de sessão).
+ * apenas para operações do Auth Admin (convites, bloqueio de sessão,
+ * ativação da área do cliente) e para gerar o contrato em PDF do portal
+ * depois de o banco confirmar que o contrato pertence ao cliente logado.
  * Nunca importar em componentes cliente ("server-only" impede).
  */
 export function isAdminConfigured() {

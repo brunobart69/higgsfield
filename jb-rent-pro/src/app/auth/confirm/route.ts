@@ -24,5 +24,6 @@ export async function GET(request: NextRequest) {
     ok = !error;
   }
 
-  return NextResponse.redirect(new URL(ok ? next : "/login?error=link", origin));
+  const fail = next.startsWith("/portal") ? "/portal/login?error=link" : "/login?error=link";
+  return NextResponse.redirect(new URL(ok ? next : fail, origin));
 }

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/env";
 
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/auth", "/setup"];
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/auth", "/setup", "/portal/login"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -40,8 +40,19 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (!user && !isPublic(pathname)) {
     const url = request.nextUrl.clone();
+    if (pathname === "/portal" || pathname.startsWith("/portal/") || pathname.startsWith("/api/portal/")) {
+      url.pathname = "/portal/login";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
     url.pathname = "/login";
     url.search = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+    return NextResponse.redirect(url);
+  }
+  if (user && pathname === "/portal/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/portal";
+    url.search = "";
     return NextResponse.redirect(url);
   }
   if (user && pathname === "/login") {

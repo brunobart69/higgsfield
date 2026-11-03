@@ -42,6 +42,15 @@ Todas ficam em **Supabase → Project Settings → API / API Keys**.
      ```
      {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&next=/reset-password
      ```
+   - **Magic Link** (área do cliente — o cliente entra com o **código** do e-mail; o link também funciona):
+     ```
+     Seu código de acesso: {{ .Token }}
+     Ou entre pelo link: {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink&next=/portal
+     ```
+     O mesmo endereço `https://SEU-DOMINIO/auth/confirm` já está nas *Redirect URLs*. A ativação do acesso
+     de cada cliente (ficha do cliente → Área do cliente) usa a `SUPABASE_SERVICE_ROLE_KEY` já configurada.
+     Para volume real de e-mails, configure um SMTP próprio em *Authentication → SMTP Settings* (o envio
+     padrão do Supabase tem limite baixo por hora).
      O convidado abre o link e define a própria senha.
 5. Aplique as migrations **em ordem** — escolha uma opção:
    - **SQL Editor**: execute, nesta ordem, os arquivos de `supabase/migrations/`
@@ -49,7 +58,7 @@ Todas ficam em **Supabase → Project Settings → API / API Keys**.
      `20261105000001_vehicles_customers.sql`, `20261106000001_rentals.sql`, `20261107000001_inspections_damages.sql`,
      `20261108000001_insurance_documents.sql`, `20261109000001_finance_categories.sql`,
      `20261109000002_maintenance_fines_accidents.sql`, `20261110000001_finance_enums.sql`,
-     `20261110000002_finance.sql`); ou
+     `20261110000002_finance.sql`, `20261111000001_calendar_notifications_portal.sql`); ou
    - **CLI**: `npx supabase login && npx supabase link --project-ref SEU_REF && npx supabase db push`.
 6. Crie o **administrador principal**: *Authentication → Users → Add user → Create new user* (e‑mail +
    senha, marque *Auto Confirm*). O primeiro usuário vira automaticamente "Administrador principal" e cria

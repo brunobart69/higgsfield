@@ -300,6 +300,28 @@ O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
   valor atual (venda, última avaliação, valor de mercado ou compra), ROI, retorno total e meses
   estimados para o lucro cobrir a depreciação (`vehicleReturns`).
 
+### 3.12 Calendário, notificações e área do cliente (migration 0009)
+
+- **Calendário** (`calendar_events`): contratos (retirada → devolução), oficina, fim de apólice, ITV e
+  prazos de multas. **Disponibilidade** (`available_vehicles`): para um período, indica veículos livres,
+  ocupados (contrato em conflito; em andamento ocupa até a devolução ou agora, se atrasado), com
+  manutenção agendada ou sem seguro para todo o período. A reserva continua protegida pela restrição
+  de conflito do banco.
+- **Notificações**: `refresh_notifications()` transforma os alertas (`dashboard_alerts` +
+  `extra_alert_rows`) em notificações persistentes por empresa, no máximo a cada 5 minutos (chamado
+  pelo layout do painel), e resolve as que deixaram de existir. Leitura por usuário em
+  `notification_reads`. Eventos (solicitações do portal) entram com `source = 'event'`.
+- **Área do cliente**: `customer_portal_accounts` liga um usuário de autenticação a UM cliente. A conta
+  é criada pelo servidor SEM `company_id` no `app_metadata` — portanto nunca recebe perfil da equipe
+  (`app.current_company_id()` é nulo e toda a RLS da empresa nega acesso). Os dados chegam apenas por
+  funções `portal_*` (SECURITY DEFINER) que filtram pelo próprio cliente; arquivos por política de
+  Storage específica; o contrato em PDF é gerado com a chave de serviço somente depois de
+  `portal_owns_rental` confirmar a posse. Equipe e portal são mutuamente exclusivos
+  (`PORTAL_STAFF_CONFLICT`); anonimizar o cliente desativa o acesso. Login por código de uso único
+  (`signInWithOtp` com `shouldCreateUser: false`), sem senha.
+- **Solicitações de reserva** (`rental_requests`): criadas pelo cliente (`portal_request_rental`, até 5
+  abertas), notificam a equipe e são tratadas em Notificações (criar reserva já preenchida).
+
 ## 4. Fluxo de autenticação
 
 ```
@@ -370,5 +392,5 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 6 | Seguros (renovações, alertas 30/15/7, prêmio como despesa, veículos sem seguro) e central de documentos (vínculos, retenção, contrato assinado) | ✅ concluída |
 | 7 | Manutenção (planos por data/km, oficina, custos), multas (identificação do condutor, repasse) e sinistros (franquia, indenização) | ✅ concluída |
 | 8 | Financeiro completo (competência × caixa), lançamentos e parcelas, contas a pagar/receber, fluxo de caixa com saldo e previsão, patrimônio, ROI e venda de veículos | ✅ concluída |
-| 9 | Calendário inteligente, notificações, área do cliente | próxima |
+| 9 | Calendário (mês, linha do tempo da frota, disponibilidade), notificações persistentes e área do cliente (login por código, contratos, pagamentos, documentos, solicitações) | ✅ concluída |
 | 10 | Relatórios CSV/PDF, testes E2E, revisão de segurança, publicação | |

@@ -4,7 +4,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { getSession } from "@/lib/auth/session";
-import { countAlerts } from "@/lib/dashboard/queries";
+import { createClient } from "@/lib/supabase/server";
+import { refreshAndCountNotifications } from "@/lib/notifications/queries";
 import { getI18n } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (session.status === "anonymous") redirect("/login");
 
   if (session.status === "no_access") {
+    // conta da área do cliente → portal
+    const supabase = await createClient();
+    const portal = await supabase.rpc("portal_me");
+    if (!portal.error && portal.data) redirect("/portal");
     const { t } = await getI18n();
     return (
       <main className="flex min-h-dvh items-center justify-center p-6">
@@ -35,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const alertCount = await countAlerts();
+  const alertCount = await refreshAndCountNotifications();
   return (
     <AppShell profile={session.profile} alertCount={alertCount}>
       {children}

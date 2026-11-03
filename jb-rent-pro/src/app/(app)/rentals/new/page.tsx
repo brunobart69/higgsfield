@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const money = (n: number | null) => (n === null ? "" : n.toFixed(2).replace(".", ","));
 
-export default async function NewRentalPage({ searchParams }: { searchParams: Promise<{ vehicle?: string; customer?: string; date?: string }> }) {
+export default async function NewRentalPage({ searchParams }: { searchParams: Promise<{ vehicle?: string; customer?: string; date?: string; until?: string; pt?: string; rt?: string }> }) {
   const [{ t }, sp, opts] = await Promise.all([getI18n(), searchParams, getRentalFormOptions()]);
   const preCustomer = sp.customer ? await getCustomer(sp.customer) : null;
   const start = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : addDays(todayInMadrid(), 1);
@@ -28,9 +28,9 @@ export default async function NewRentalPage({ searchParams }: { searchParams: Pr
     vehicle_id: opts.vehicles.some((v) => v.id === sp.vehicle) ? sp.vehicle! : "",
     status: "confirmed",
     pickup_date: start,
-    pickup_time: "10:00",
-    return_date: addDays(start, 3),
-    return_time: "10:00",
+    pickup_time: sp.pt && /^\d{2}:\d{2}$/.test(sp.pt) ? sp.pt : "10:00",
+    return_date: sp.until && /^\d{4}-\d{2}-\d{2}$/.test(sp.until) && sp.until >= start ? sp.until : addDays(start, 3),
+    return_time: sp.rt && /^\d{2}:\d{2}$/.test(sp.rt) ? sp.rt : "10:00",
     pricing_mode: "daily",
     unit_price: "",
     discount_amount: "",

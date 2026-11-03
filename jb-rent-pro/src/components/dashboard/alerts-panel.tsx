@@ -14,7 +14,7 @@ const severityStyle: Record<AlertSeverity, { variant: "danger" | "warning" | "in
   info: { variant: "info", icon: BellRing },
 };
 
-function alertHref(a: DashboardAlert): string | null {
+export function alertHref(a: Pick<DashboardAlert, "kind" | "entity" | "entity_id">): string | null {
   switch (a.entity) {
     case "rentals":
       return `/rentals/${a.entity_id}`;
@@ -28,6 +28,8 @@ function alertHref(a: DashboardAlert): string | null {
       return `/fines/${a.entity_id}`;
     case "accidents":
       return `/fines/accidents/${a.entity_id}`;
+    case "rental_requests":
+      return "/notifications#requests";
     case "insurance_policies":
       return `/insurance/${a.entity_id}`;
     case "documents":

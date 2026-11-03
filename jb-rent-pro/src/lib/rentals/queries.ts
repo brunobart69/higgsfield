@@ -168,8 +168,8 @@ export type RentalDetail = {
   balance: number;
 };
 
-export async function getRental(id: string): Promise<RentalDetail | null> {
-  const supabase = await createClient();
+export async function getRental(id: string, client?: Awaited<ReturnType<typeof createClient>>): Promise<RentalDetail | null> {
+  const supabase = client ?? (await createClient());
   const { data, error } = await supabase
     .from("rentals")
     .select(

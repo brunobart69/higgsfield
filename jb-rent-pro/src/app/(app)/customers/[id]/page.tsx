@@ -7,6 +7,10 @@ import { listCustomerDeposits } from "@/lib/rentals/queries";
 import { listDamages } from "@/lib/inspections/queries";
 import { DamageList } from "@/components/inspections/lists";
 import { getI18n } from "@/lib/i18n/server";
+import { KeyRound } from "lucide-react";
+import { siteUrl } from "@/lib/site";
+import { PortalAccess } from "@/components/customers/portal-access";
+import { getPortalAccount } from "@/lib/customers/portal";
 import { listAccidents, listFines } from "@/lib/fines/queries";
 import { AccidentList, FineList } from "@/components/fines/lists";
 import { interpolate } from "@/lib/i18n/config";
@@ -58,6 +62,7 @@ export default async function CustomerPage({
   const f = ct.fields;
   const today = todayInMadrid();
   const name = customerName(c);
+  const portal = tab === "data" ? await getPortalAccount(id) : null;
   const isOwner = session.profile.role === "owner";
   const Icon = c.customer_type === "company" ? Building2 : User;
   const summary = await getCustomerSummary(id);
@@ -207,6 +212,7 @@ export default async function CustomerPage({
               </CardContent>
             </Card>
           </div>
+          <div className="space-y-6">
           <Card className="h-fit">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -228,6 +234,22 @@ export default async function CustomerPage({
               )}
             </CardContent>
           </Card>
+          <Card className="h-fit">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="size-4 text-gold" /> {ct.portal.title}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PortalAccess
+                customerId={id}
+                account={portal}
+                portalUrl={`${await siteUrl()}/portal`}
+                canInvite={!c.anonymized_at && !c.archived_at && !!c.email}
+              />
+            </CardContent>
+          </Card>
+          </div>
         </div>
       )}
 

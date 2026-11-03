@@ -143,10 +143,3 @@ export async function loadDashboard(period: DateRange, chart: DateRange): Promis
   return { ok: true, kpis, monthly, vehicles, alerts };
 }
 
-/** Quantidade de alertas para o sino do cabeçalho. */
-export async function countAlerts(): Promise<number> {
-  const supabase = await createClient();
-  const [base, extra] = await Promise.all([supabase.rpc("dashboard_alerts", { p_limit: 100 }), supabase.rpc("extra_alert_rows")]);
-  if (base.error) return 0;
-  return (Array.isArray(base.data) ? base.data.length : 0) + (!extra.error && Array.isArray(extra.data) ? extra.data.length : 0);
-}
