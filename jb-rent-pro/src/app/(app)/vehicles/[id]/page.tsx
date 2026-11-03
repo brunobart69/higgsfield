@@ -8,6 +8,7 @@ import { DamageList, InspectionList } from "@/components/inspections/lists";
 import { StartInspection } from "@/components/inspections/start-inspection";
 import { Button } from "@/components/ui/button";
 import { getI18n } from "@/lib/i18n/server";
+import { interpolate } from "@/lib/i18n/config";
 import { listPolicies } from "@/lib/insurance/queries";
 import { getMaintenanceFormOptions, listMaintenance, listPlans } from "@/lib/maintenance/queries";
 import { getRentalOptions, listAccidents, listFines } from "@/lib/fines/queries";
@@ -45,6 +46,7 @@ import { VehicleStatusBadge } from "@/components/vehicles/status-badge";
 import { VehicleHeaderActions } from "@/components/vehicles/vehicle-header-actions";
 import { PhotoGallery } from "@/components/vehicles/photo-gallery";
 import { VehicleDocuments } from "@/components/vehicles/vehicle-documents";
+import { VehicleSale } from "@/components/assets/vehicle-sale";
 
 const TABS = ["general", "rentals", "damages", "inspections", "maintenance", "fines", "insurance", "documents", "financial", "history"] as const;
 type Tab = (typeof TABS)[number];
@@ -108,6 +110,9 @@ export default async function VehiclePage({
               </Link>
             </Button>
           )}
+          {session.profile.role === "owner" && !v.archived_at && (
+            <VehicleSale vehicleId={v.id} sold={!!v.sold_at} suggested={v.market_value === null ? null : Number(v.market_value)} />
+          )}
           <VehicleHeaderActions id={v.id} name={`${name} · ${v.plate}`} status={v.status as VehicleStatus} archived={!!v.archived_at} />
         </div>
       </div>
@@ -164,6 +169,9 @@ export default async function VehiclePage({
                     { label: vt.fields.fleet_entry_date, value: v.fleet_entry_date && formatDate(v.fleet_entry_date) },
                     { label: vt.fields.purchase_price.replace(" (€)", ""), value: v.purchase_price !== null && formatCurrency(v.purchase_price, locale) },
                     { label: vt.fields.market_value.replace(" (€)", ""), value: v.market_value !== null && formatCurrency(v.market_value, locale) },
+                    ...(v.sold_at && v.sale_price !== null
+                      ? [{ label: t.assets.sale.title, value: interpolate(t.assets.sale.soldOn, { date: formatDate(v.sold_at), amount: formatCurrency(Number(v.sale_price), locale) }) }]
+                      : []),
                     {
                       label: vt.fields.itv_due_date,
                       value: v.itv_due_date && (

@@ -24,6 +24,9 @@ export type VehicleListItem = {
 
 export type VehicleDetail = VehicleListItem & {
   vin: string | null;
+  sold_at: string | null;
+  sale_price: number | null;
+  sale_notes: string | null;
   color: string | null;
   vehicle_type: string | null;
   doors: number | null;

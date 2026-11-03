@@ -52,5 +52,8 @@ npm run dev
 - **Fase 7 ✅** — manutenção (planos por data/km, agenda da oficina, custos lançados no financeiro,
   reparo de avarias), multas (identificação automática do contrato/condutor, prazos, repasse ao
   cliente) e sinistros (fotos, avarias, apólice, franquia e indenização).
+- **Fase 8 ✅** — financeiro completo (resultado por competência ou caixa, lançamentos manuais e
+  parcelas, contas a pagar e receber, fluxo de caixa com saldo e previsão) e patrimônio (valor da
+  frota, ROI e recuperação por veículo, venda de veículos).
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.

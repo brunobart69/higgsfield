@@ -273,6 +273,33 @@ O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
   do cliente e indenização recebida → "Recuperação de danos". Alerta enquanto não for comunicado à
   seguradora. Os prazos legais e contratuais não são presumidos: constam nas notificações e na apólice.
 
+### 3.11 Financeiro e patrimônio (migrations 0008a e 0008)
+
+- **Resultado operacional × não operacional**: `is_operational` é calculado por
+  `app.is_operational_category`. Ficam fora do resultado (mas entram no caixa e no patrimônio):
+  compra e venda de veículo, financiamento recebido/parcelas e aportes/retiradas de sócios.
+- **Lançamentos automáticos** (contratos, apólices, manutenções, multas, sinistros, compra/venda de
+  veículo) não podem ser alterados manualmente (`AUTO_ENTRY_LOCKED`): só observações e comprovante.
+  A verificação usa `pg_trigger_depth()` — as rotinas de sincronização rodam dentro de gatilhos.
+  Lançamento anulado não volta a valer (crie outro). Nada é excluído.
+- **Compra do veículo**: lançada automaticamente a partir do preço e da data de aquisição (as
+  compras existentes são lançadas pela migration). Lançar a compra à mão gera `DUPLICATE_PURCHASE`.
+- **Venda do veículo** (somente administrador principal): `sold_at` + `sale_price` → status
+  "vendido", saída da frota e entrada "Venda de veículo". Bloqueada com reservas/contratos abertos.
+- **Parcelas**: o lançamento manual pode ser dividido em até 120 parcelas mensais (`series_id`,
+  `installment_no/count`); o arredondamento em centavos fica na última parcela.
+- **Regimes**: `finance_report(from, to, 'accrual'|'cash')`. Competência = `competence_date`
+  (aluguel na devolução). Caixa = `app.cash_movements`: pagamentos/estornos efetivos dos contratos
+  (`rental_payments`) + demais lançamentos pagos pela data de pagamento. Cauções nunca entram.
+- **Fluxo de caixa** (`cash_flow`): entradas/saídas realizadas, previsão (lançamentos pendentes pelo
+  vencimento e saldos de contratos), cauções à parte e saldo acumulado a partir do saldo inicial
+  (`companies.cash_opening_balance/date`, definido pelo administrador principal). Meses futuros
+  mostram saldo projetado.
+- **Contas a pagar/receber** (`open_items`): saldos de contratos + lançamentos pendentes.
+- **Rentabilidade** (`fleet_roi`): receita, despesas e lucro operacional por veículo desde a entrada,
+  valor atual (venda, última avaliação, valor de mercado ou compra), ROI, retorno total e meses
+  estimados para o lucro cobrir a depreciação (`vehicleReturns`).
+
 ## 4. Fluxo de autenticação
 
 ```
@@ -342,6 +369,6 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 5 | Inspeções de entrega/devolução/periódicas com checklist e fotos, comparação, avarias com fotos e custos, relatórios PDF | ✅ concluída |
 | 6 | Seguros (renovações, alertas 30/15/7, prêmio como despesa, veículos sem seguro) e central de documentos (vínculos, retenção, contrato assinado) | ✅ concluída |
 | 7 | Manutenção (planos por data/km, oficina, custos), multas (identificação do condutor, repasse) e sinistros (franquia, indenização) | ✅ concluída |
-| 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | próxima |
-| 9 | Calendário inteligente, notificações, área do cliente | |
+| 8 | Financeiro completo (competência × caixa), lançamentos e parcelas, contas a pagar/receber, fluxo de caixa com saldo e previsão, patrimônio, ROI e venda de veículos | ✅ concluída |
+| 9 | Calendário inteligente, notificações, área do cliente | próxima |
 | 10 | Relatórios CSV/PDF, testes E2E, revisão de segurança, publicação | |

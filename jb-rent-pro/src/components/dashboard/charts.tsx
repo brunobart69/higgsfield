@@ -307,3 +307,49 @@ export function AssetsChart({ data }: { data: MonthlyPoint[] }) {
     </ChartCard>
   );
 }
+
+type CashPoint = { month: string; inflow: number; outflow: number; net: number; balance: number; projected_in: number; projected_out: number; deposits_in: number; deposits_out: number };
+
+/** Fluxo de caixa: entradas e saídas realizadas, saldo acumulado e previsão de vencimentos. */
+export function CashFlowChart({ data, title, subtitle }: { data: CashPoint[]; title: string; subtitle: string }) {
+  const { t, locale } = useI18n();
+  const c = t.financial.cashflow;
+  const money = (v: number) => formatCurrency(v, locale);
+  const isEmpty = data.every((d) => !d.inflow && !d.outflow && !d.projected_in && !d.projected_out && !d.balance);
+  return (
+    <ChartCard
+      title={title}
+      subtitle={subtitle}
+      isEmpty={isEmpty}
+      rows={data}
+      columns={[
+        { label: c.month, render: (r) => formatMonthShort(r.month, locale) },
+        { label: c.inflow, render: (r) => money(r.inflow), align: "right" },
+        { label: c.outflow, render: (r) => money(r.outflow), align: "right" },
+        { label: c.net, render: (r) => money(r.net), align: "right" },
+        { label: c.balance, render: (r) => money(r.balance), align: "right" },
+        { label: c.projectedIn, render: (r) => money(r.projected_in), align: "right" },
+        { label: c.projectedOut, render: (r) => money(r.projected_out), align: "right" },
+        { label: c.deposits, render: (r) => `${money(r.deposits_in)} / ${money(r.deposits_out)}`, align: "right" },
+      ]}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }} barGap={2} barCategoryGap="24%">
+          <CartesianGrid {...GRID} />
+          <XAxis dataKey="month" {...AXIS} tickFormatter={(v: string) => formatMonthShort(v, locale)} interval="preserveStartEnd" minTickGap={8} />
+          <YAxis {...AXIS} width={64} tickFormatter={(v: number) => formatCurrency(v, locale, { compact: true })} />
+          <Tooltip
+            cursor={{ fill: "rgba(255,255,255,0.04)" }}
+            content={<TooltipBox labelFormatter={(l) => formatMonthShort(l, locale)} valueFormatter={money} />}
+          />
+          <Legend verticalAlign="top" align="right" height={28} iconType="circle" iconSize={8} itemSorter={null} formatter={legendText} />
+          <Bar dataKey="inflow" name={c.inflow} stackId="in" fill={C1} maxBarSize={22} />
+          <Bar dataKey="projected_in" name={c.projectedIn} stackId="in" fill={C1} fillOpacity={0.35} radius={[4, 4, 0, 0]} maxBarSize={22} />
+          <Bar dataKey="outflow" name={c.outflow} stackId="out" fill={C2} maxBarSize={22} />
+          <Bar dataKey="projected_out" name={c.projectedOut} stackId="out" fill={C2} fillOpacity={0.35} radius={[4, 4, 0, 0]} maxBarSize={22} />
+          <Line dataKey="balance" name={c.balance} stroke={C3} strokeWidth={2} type="monotone" dot={{ r: 3, fill: C3, stroke: "var(--surface)", strokeWidth: 2 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}

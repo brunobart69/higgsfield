@@ -137,9 +137,14 @@ insert into public.financial_transactions (type, category, description, amount, 
 values ('income',  'rental',           'Aluguel JB-1',     1000.10, '2026-10-05', 'paid',    '2026-10-05', 'aaaaaaaa-0000-0000-0000-000000000001'),
        ('income',  'other_income',     'Outros',              0.20, '2026-10-06', 'pending', null,         null),
        ('expense', 'maintenance',      'Troca de óleo',     300.05, '2026-10-10', 'paid',    '2026-10-10', 'aaaaaaaa-0000-0000-0000-000000000001'),
-       ('expense', 'vehicle_purchase', 'Compra Corolla',  22000.00, '2026-10-01', 'paid',    '2026-10-01', 'aaaaaaaa-0000-0000-0000-000000000001'),
        ('expense', 'cleaning',         'Cancelado',          99.99, '2026-10-11', 'cancelled', null,       null),
        ('income',  'rental',           'Fora do período',   500.00, '2026-09-30', 'paid',    '2026-09-30', null);
+
+-- a compra do veículo é lançada automaticamente a partir do preço de compra (fase 8)
+do $$ begin
+  assert (select amount from public.financial_transactions where vehicle_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+           and category = 'vehicle_purchase' and source_ref is not null) = 22000.00, 'compra automática';
+end $$;
 
 -- categoria incompatível com o tipo
 do $$ begin

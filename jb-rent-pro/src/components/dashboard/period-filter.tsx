@@ -9,7 +9,7 @@ import { PERIOD_KEYS, type PeriodKey } from "@/lib/periods";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export function PeriodFilter({ value, from, to }: { value: PeriodKey; from: string; to: string }) {
+export function PeriodFilter({ value, from, to, keep }: { value: PeriodKey; from: string; to: string; keep?: Record<string, string | undefined> }) {
   const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -20,7 +20,8 @@ export function PeriodFilter({ value, from, to }: { value: PeriodKey; from: stri
   const invalid = !customFrom || !customTo || customFrom > customTo;
 
   function go(params: Record<string, string>) {
-    startTransition(() => router.push(`${pathname}?${new URLSearchParams(params).toString()}`, { scroll: false }));
+    const extra = Object.fromEntries(Object.entries(keep ?? {}).filter((e): e is [string, string] => !!e[1]));
+    startTransition(() => router.push(`${pathname}?${new URLSearchParams({ ...extra, ...params }).toString()}`, { scroll: false }));
   }
 
   function select(key: PeriodKey) {
