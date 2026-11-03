@@ -57,6 +57,7 @@ export const defaultsSchema = z
     default_mileage_policy: z.enum(MILEAGE_POLICIES),
     default_mileage_limit_km: optionalInt(1, 1_000_000),
     default_excess_km_price: optionalMoney(999),
+    rental_grace_minutes: optionalInt(0, 720).transform((v) => v ?? 0),
   })
   .superRefine((v, ctx) => {
     if (v.default_mileage_policy !== "unlimited" && v.default_mileage_limit_km === null) {

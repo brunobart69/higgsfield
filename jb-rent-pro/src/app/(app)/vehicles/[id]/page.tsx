@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CarFront, FileText, Receipt, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CarFront, FileText, Plus, Receipt, ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getI18n } from "@/lib/i18n/server";
 import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
@@ -87,6 +88,13 @@ export default async function VehiclePage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {!v.archived_at && (
+            <Button asChild variant="outline">
+              <Link href={`/rentals/new?vehicle=${v.id}`}>
+                <Plus /> {t.rentals.new}
+              </Link>
+            </Button>
+          )}
           <VehicleHeaderActions id={v.id} name={`${name} · ${v.plate}`} status={v.status as VehicleStatus} archived={!!v.archived_at} />
         </div>
       </div>
@@ -94,7 +102,7 @@ export default async function VehiclePage({
       <TabsNav active={tab} tabs={TABS.map((k) => ({ key: k, label: vt.tabs[k], href: `/vehicles/${id}?tab=${k}` }))} />
 
       {tab === "general" && (
-        <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_24rem]">
           <div className="space-y-6">
             <Card>
               <CardHeader>
@@ -215,14 +223,19 @@ async function RentalsTab({ id }: { id: string }) {
   if (rows.length === 0)
     return (
       <EmptyState icon={FileText} title={t.vehicles.rentalsEmpty}>
-        <p className="text-xs text-subtle">{interpolate(t.common.availableInPhase, { n: 4 })}</p>
+        <Button asChild size="sm">
+          <Link href={`/rentals/new?vehicle=${id}`}>
+            <Plus /> {t.rentals.new}
+          </Link>
+        </Button>
       </EmptyState>
     );
   return (
     <Card>
       <ul className="divide-y divide-border">
         {rows.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center gap-3 p-4">
+          <li key={r.id}>
+            <Link href={`/rentals/${r.id}`} className="flex flex-wrap items-center gap-3 p-4 transition hover:bg-surface-2/60">
             <span className="font-mono text-xs">{r.contract_number}</span>
             <Badge variant="neutral">{t.rentalStatus[r.status as keyof typeof t.rentalStatus] ?? r.status}</Badge>
             <span className="min-w-0 flex-1 truncate text-sm">{r.customer}</span>
@@ -230,6 +243,7 @@ async function RentalsTab({ id }: { id: string }) {
               {formatDateTime(r.pickup_at)} → {formatDateTime(r.return_at)}
             </span>
             <span className="text-sm font-medium tabular">{formatCurrency(r.total_amount, locale)}</span>
+            </Link>
           </li>
         ))}
       </ul>

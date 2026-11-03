@@ -132,6 +132,13 @@ export function DefaultsForm({ c }: { c: CompanySettings }) {
           onChange={(e) => setPolicy(e.target.value as typeof policy)}
           options={MILEAGE_POLICIES.map((p) => ({ value: p, label: t.settings.mileage[p] }))}
         />
+        <F
+          label={f.rental_grace_minutes}
+          name="rental_grace_minutes"
+          defaultValue={String(c.rental_grace_minutes ?? 0)}
+          inputMode="numeric"
+          hint={t.settings.graceHint}
+        />
         {policy !== "unlimited" && (
           <div className="grid grid-cols-2 gap-4">
             <F label={f.default_mileage_limit_km} name="default_mileage_limit_km" defaultValue={c.default_mileage_limit_km ?? ""} inputMode="numeric" required />

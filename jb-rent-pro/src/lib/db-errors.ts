@@ -7,6 +7,13 @@ export function mapDbError(err: { code?: string; message?: string } | null | und
   if (msg.includes("HARD_DELETE_FORBIDDEN")) return "hardDeleteForbidden";
   if (msg.includes("VEHICLE_NOT_RENTABLE")) return "vehicleNotRentable";
   if (msg.includes("MILEAGE_DECREASE")) return "mileageDecrease";
+  if (msg.includes("INVALID_STATUS_TRANSITION")) return "invalidStatusTransition";
+  if (msg.includes("PICKUP_DATA_REQUIRED")) return "pickupDataRequired";
+  if (msg.includes("RETURN_DATA_REQUIRED")) return "returnDataRequired";
+  if (msg.includes("CANCEL_REASON_REQUIRED")) return "cancelReasonRequired";
+  if (msg.includes("RENTAL_LOCKED")) return "rentalLocked";
+  if (msg.includes("DISCOUNT_TOO_HIGH")) return "discountTooHigh";
+  if (msg.includes("PAYMENT_IMMUTABLE")) return "paymentImmutable";
   if (msg.includes("CUSTOMER_HAS_ACTIVE_RENTALS")) return "customerHasActiveRentals";
   switch (err.code) {
     case "42501":

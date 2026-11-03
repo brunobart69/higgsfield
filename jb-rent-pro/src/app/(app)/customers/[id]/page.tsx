@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, FileText, ShieldCheck, User, Wallet } from "lucide-react";
+import { ArrowLeft, Building2, FileText, Plus, ShieldCheck, User, Wallet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { listCustomerDeposits } from "@/lib/rentals/queries";
 import { getI18n } from "@/lib/i18n/server";
 import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
@@ -86,6 +88,13 @@ export default async function CustomerPage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {!c.archived_at && (
+            <Button asChild variant="outline">
+              <Link href={`/rentals/new?customer=${id}`}>
+                <Plus /> {t.rentals.new}
+              </Link>
+            </Button>
+          )}
           <CustomerHeaderActions id={id} name={name} archived={!!c.archived_at} anonymized={!!c.anonymized_at} />
         </div>
       </div>
@@ -102,7 +111,7 @@ export default async function CustomerPage({
       <TabsNav active={tab} tabs={TABS.map((k) => ({ key: k, label: ct.tabs[k], href: `/customers/${id}?tab=${k}` }))} />
 
       {tab === "data" && (
-        <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_22rem]">
           <div className="space-y-6">
             {c.customer_type === "individual" ? (
               <>
@@ -221,7 +230,7 @@ export default async function CustomerPage({
 
       {tab === "rentals" && <RentalsTab id={id} />}
       {tab === "payments" && <PaymentsTab id={id} />}
-      {tab === "deposits" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 4 })} />}
+      {tab === "deposits" && <DepositsTab id={id} />}
       {tab === "fines" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
       {tab === "damages" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 5 })} />}
       {tab === "documents" && (
@@ -252,14 +261,19 @@ async function RentalsTab({ id }: { id: string }) {
   if (rows.length === 0)
     return (
       <EmptyState icon={FileText} title={t.customers.rentalsEmpty}>
-        <p className="text-xs text-subtle">{interpolate(t.common.availableInPhase, { n: 4 })}</p>
+        <Button asChild size="sm">
+          <Link href={`/rentals/new?customer=${id}`}>
+            <Plus /> {t.rentals.new}
+          </Link>
+        </Button>
       </EmptyState>
     );
   return (
     <Card>
       <ul className="divide-y divide-border">
         {rows.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center gap-3 p-4">
+          <li key={r.id}>
+            <Link href={`/rentals/${r.id}`} className="flex flex-wrap items-center gap-3 p-4 transition hover:bg-surface-2/60">
             <span className="font-mono text-xs">{r.contract_number}</span>
             <Badge variant="neutral">{t.rentalStatus[r.status as keyof typeof t.rentalStatus] ?? r.status}</Badge>
             <span className="min-w-0 flex-1 truncate text-sm">{r.vehicle}</span>
@@ -267,6 +281,31 @@ async function RentalsTab({ id }: { id: string }) {
               {formatDateTime(r.pickup_at)} → {formatDateTime(r.return_at)}
             </span>
             <span className="text-sm font-medium tabular">{formatCurrency(r.total_amount, locale)}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+async function DepositsTab({ id }: { id: string }) {
+  const [{ t, locale }, rows] = await Promise.all([getI18n(), listCustomerDeposits(id)]);
+  if (rows.length === 0) return <EmptyState icon={Wallet} title={t.deposits.empty} />;
+  return (
+    <Card>
+      <ul className="divide-y divide-border">
+        {rows.map((d) => (
+          <li key={d.id}>
+            <Link href={`/rentals/${d.rental_id}`} className="flex flex-wrap items-center gap-3 p-4 text-sm transition hover:bg-surface-2/60">
+              <span className="font-mono text-xs">{d.contract_number}</span>
+              <Badge variant={d.status === "held" ? "info" : d.status === "settled" ? "success" : "warning"}>{t.deposits.status[d.status]}</Badge>
+              <span className="flex-1 text-xs text-muted tabular">
+                {t.deposits.received} {formatCurrency(d.received, locale)} · {t.deposits.returned} {formatCurrency(d.returned, locale)}
+                {d.retained ? ` · ${t.deposits.retained} ${formatCurrency(d.retained, locale)}` : ""}
+              </span>
+              <span className="font-medium tabular">{formatCurrency(d.balance, locale)}</span>
+            </Link>
           </li>
         ))}
       </ul>

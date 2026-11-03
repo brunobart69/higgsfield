@@ -15,6 +15,8 @@ export type DashboardKpis = {
   upcoming_returns: number;
   insurance_expiring: number;
   documents_expiring: number;
+  deposits_held: number;
+  deposits_held_amount: number;
 };
 
 export type MonthlyPoint = {
@@ -48,7 +50,8 @@ export type AlertKind =
   | "itv_expired"
   | "document_expiring"
   | "document_expired"
-  | "payment_overdue";
+  | "payment_overdue"
+  | "deposit_pending";
 
 export type AlertSeverity = "critical" | "high" | "medium" | "low" | "info";
 
@@ -101,6 +104,8 @@ export async function loadDashboard(period: DateRange, chart: DateRange): Promis
     upcoming_returns: num(k.upcoming_returns),
     insurance_expiring: num(k.insurance_expiring),
     documents_expiring: num(k.documents_expiring),
+    deposits_held: num(k.deposits_held),
+    deposits_held_amount: num(k.deposits_held_amount),
   };
 
   const monthly = ((monthlyRes.data ?? []) as Record<string, unknown>[]).map((r) => ({

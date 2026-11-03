@@ -29,6 +29,7 @@ export type CompanySettings = {
   default_mileage_policy: "unlimited" | "daily" | "weekly" | "monthly" | "custom";
   default_mileage_limit_km: number | null;
   default_excess_km_price: number | null;
+  rental_grace_minutes: number;
   rental_conditions_pt: string | null;
   rental_conditions_es: string | null;
   contract_footer: string | null;
@@ -45,7 +46,7 @@ export type Fee = {
 };
 
 const COMPANY_COLUMNS =
-  "id, name, legal_name, tax_id, address, city, postal_code, province, phone, email, website, logo_path, default_locale, currency, timezone, vat_rate, prices_include_vat, iban, fiscal_notes, document_retention_years, default_daily_price, default_weekly_price, default_monthly_price, default_deposit_amount, default_mileage_policy, default_mileage_limit_km, default_excess_km_price, rental_conditions_pt, rental_conditions_es, contract_footer";
+  "id, name, legal_name, tax_id, address, city, postal_code, province, phone, email, website, logo_path, default_locale, currency, timezone, vat_rate, prices_include_vat, iban, fiscal_notes, document_retention_years, default_daily_price, default_weekly_price, default_monthly_price, default_deposit_amount, default_mileage_policy, default_mileage_limit_km, default_excess_km_price, rental_grace_minutes, rental_conditions_pt, rental_conditions_es, contract_footer";
 
 export async function getCompanySettings(): Promise<CompanySettings | null> {
   const supabase = await createClient();

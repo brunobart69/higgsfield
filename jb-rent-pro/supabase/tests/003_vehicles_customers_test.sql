@@ -103,14 +103,14 @@ do $$
 declare j jsonb;
 begin
   j := public.vehicle_financials('aaaaaaaa-0000-0000-0000-000000000001');
-  assert (j ->> 'revenue')::numeric = 1000.10, 'receita acumulada do veículo: ' || (j ->> 'revenue');
+  assert (j ->> 'revenue')::numeric = 1180.10, 'receita acumulada do veículo: ' || (j ->> 'revenue');
   assert (j ->> 'expenses')::numeric = 300.05, 'despesa operacional do veículo';
   assert (j ->> 'investment')::numeric = 22000.00, 'investimento separado';
   assert (j ->> 'rentals')::int = 2, 'contratos não cancelados';
   assert (j ->> 'rented_days')::int = 4, 'dias alugados (confirmado 4 dias; reserva não conta)';
   j := public.customer_summary('cccccccc-0000-0000-0000-000000000001');
   assert (j ->> 'rentals')::int = 2, 'aluguéis do cliente';
-  assert (j ->> 'billed')::numeric = 180.00, 'faturado ao cliente';
+  assert (j ->> 'billed')::numeric = 225.00, 'faturado ao cliente (180 confirmado + 45 reserva)';
 end $$;
 
 -- ---------- Proprietário: km corrigida e anonimização ------------------------

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AlertOctagon, AlertTriangle, BellRing, CheckCircle2, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +13,17 @@ const severityStyle: Record<AlertSeverity, { variant: "danger" | "warning" | "in
   low: { variant: "neutral", icon: Info },
   info: { variant: "info", icon: BellRing },
 };
+
+function AlertRow({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const cls = "-mx-2 flex items-start gap-3 rounded-md px-2 py-1";
+  return href ? (
+    <Link href={href} className={`${cls} transition hover:bg-surface-2/60`}>
+      {children}
+    </Link>
+  ) : (
+    <div className={cls}>{children}</div>
+  );
+}
 
 export function AlertsPanel({ alerts, t }: { alerts: DashboardAlert[]; t: Dictionary }) {
   return (
@@ -33,8 +45,11 @@ export function AlertsPanel({ alerts, t }: { alerts: DashboardAlert[]; t: Dictio
             {alerts.map((a) => {
               const s = severityStyle[a.severity] ?? severityStyle.info;
               const Icon = s.icon;
+              const href =
+                a.entity === "rentals" ? `/rentals/${a.entity_id}` : a.entity === "vehicles" ? `/vehicles/${a.entity_id}` : a.entity === "deposits" ? "/deposits" : null;
               return (
-                <li key={`${a.kind}-${a.entity_id}`} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+                <li key={`${a.kind}-${a.entity_id}`} className="py-3 first:pt-0 last:pb-0">
+                  <AlertRow href={href}>
                   <span className="mt-0.5">
                     <Icon
                       className={
@@ -55,6 +70,7 @@ export function AlertsPanel({ alerts, t }: { alerts: DashboardAlert[]; t: Dictio
                       {formatDate(a.due_date)}
                     </time>
                   )}
+                  </AlertRow>
                 </li>
               );
             })}

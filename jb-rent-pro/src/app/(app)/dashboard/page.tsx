@@ -124,7 +124,7 @@ export default async function DashboardPage({
           </section>
 
           {/* Operação e vencimentos */}
-          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             <KpiCard label={k.activeContracts} value={formatNumber(data.kpis.active_contracts, locale)} icon={FileSignature} tone="gold" />
             <KpiCard label={k.upcomingReturns} value={formatNumber(data.kpis.upcoming_returns, locale)} hint={k.upcomingReturnsHint} icon={CalendarClock} tone="info" />
             <KpiCard
@@ -140,6 +140,14 @@ export default async function DashboardPage({
               hint={k.expiringHint}
               icon={FileClock}
               tone={data.kpis.documents_expiring > 0 ? "warning" : "neutral"}
+            />
+            <KpiCard
+              label={k.depositsHeld}
+              value={formatNumber(data.kpis.deposits_held, locale)}
+              hint={formatCurrency(data.kpis.deposits_held_amount, locale)}
+              icon={ShieldAlert}
+              tone={data.kpis.deposits_held > 0 ? "info" : "neutral"}
+              className="col-span-2 md:col-span-1"
             />
           </section>
 

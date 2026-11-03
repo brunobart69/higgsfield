@@ -100,8 +100,9 @@ Futuros módulos seguem o mesmo padrão: `src/app/(app)/<modulo>/` (páginas + `
 | ✅ `branches` | 2 (UI futura) | Filiais — estrutura preparada para expansão |
 | ✅ `vehicle_photos` | 3 | Fotos (principal, externas, internas, detalhes); uma única principal por veículo |
 | ✅ `customer_documents` | 3 | Documentos pessoais (DNI/NIE, carteira, comprovantes) — exclusão só pelo adm. principal |
-| `rental_payments` | 4 | Pagamentos parciais do contrato → saldo pendente |
-| `deposits` | 4 | Cauções: recebido, devolvido, retenções, motivo |
+| ✅ `rental_payments` | 4 | Pagamentos e estornos do contrato (fluxo de caixa); nunca alterados, só anulados com motivo |
+| ✅ `rental_extras` | 4 | Extras do contrato (catálogo ou livres), por aluguel ou por dia |
+| ✅ `deposits` | 4 | Cauções: recebido, devolvido, retido (com motivo), saldo e situação calculados — **fora da receita** |
 | `inspections` / `inspection_items` | 5 | Inspeção de entrega e devolução, comparação |
 | `damages` | 5 | Avarias com gravidade, custos estimado/real, status |
 | `maintenance_records` | 7 | Preventiva/corretiva, próxima revisão por data/km |
@@ -178,7 +179,29 @@ do usuário autenticado (apenas se `is_active`). Políticas:
 **Fórmulas** — Ocupação = dias alugados ÷ dias em que o veículo esteve na frota × 100 (dias civis em
 Europe/Madrid, devolução exclusiva). ROI (fase 8) = resultado acumulado ÷ investimento inicial × 100.
 
-### 3.6 Envio de arquivos
+### 3.6 Contratos (cálculo no banco)
+
+| Item | Regra (`app.compute_rental`) |
+|---|---|
+| Dias cobrados | blocos de 24 h desde a retirada, mínimo 1; tolerância configurável em minutos (`companies.rental_grace_minutes`) |
+| Valor base | diária × dias; semanal = preço × dias ÷ 7; mensal = preço × dias ÷ 30; personalizado = valor fechado |
+| Extras | Σ valor × quantidade × (dias, se "por dia") |
+| Km incluída | ilimitada / limite × dias / × semanas iniciadas / × meses iniciados / limite total |
+| Km excedente | max(0, rodados − incluídos) × preço por km, calculado na devolução |
+| Total | base + outras taxas − desconto + extras + km excedente (desconto ≤ base + taxas) |
+| Fluxo de status | reserva → confirmado → em andamento → finalizado; reserva/confirmado → cancelado (com motivo). "Atrasado" é derivado (em andamento e devolução prevista vencida) |
+| Entrega / devolução | exigem km e combustível; o veículo passa a "alugado" e volta a "disponível"; a km do veículo é atualizada |
+| Contrato fechado | finalizado/cancelado não pode ter valores, período, extras ou partes alterados |
+| Financeiro | linhas automáticas em `financial_transactions` (aluguel, extras, km excedente) com competência na data de devolução; ficam "pagas" quando o saldo do contrato zera; reservas não geram receita; cancelamento anula |
+| Gravação | `save_rental` grava contrato + extras numa transação (tudo ou nada) |
+
+O formulário mostra uma prévia com as mesmas fórmulas (`src/lib/rentals/calc.ts`), conferidas por testes
+contra os mesmos casos do banco. O contrato em PDF (`/api/rentals/<id>/contract?lang=pt-BR|es-ES`) é
+gerado no servidor com `pdf-lib`, com logotipo, partes, veículo, período, valores, caução,
+quilometragem, combustível, condições cadastradas e campos de assinatura; `rentals.signature_status`
+e `signature_provider_ref` preparam a integração futura com assinatura eletrônica.
+
+### 3.7 Envio de arquivos
 
 ```
 Navegador ─ reduz fotos para ≤ 2000 px (JPEG) ─► upload direto ao Storage privado (RLS da pasta da empresa)
@@ -256,8 +279,8 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 1 | Identidade visual, estrutura, login, recuperação/alteração de senha, dashboard real, PWA, i18n, núcleo do banco com RLS | ✅ concluída |
 | 2 | Usuários (convite, cargos, desativação, link de senha), configurações da empresa (dados, fiscal, preços padrão, contrato, taxas, logotipo), perfil próprio, histórico de acessos e registro de atividades | ✅ concluída |
 | 3 | Veículos (ficha com 9 abas, fotos, documentos, busca, arquivamento, histórico de valor) e clientes (PF/PJ, DNI/NIE validado, documentos pessoais, histórico, RGPD/anonimização), busca global | ✅ concluída |
-| 4 | Reservas/contratos, cálculos, pagamentos, cauções, quilometragem, PDF PT/ES | próxima |
-| 5 | Inspeções de entrega/devolução, comparação, avarias com fotos, PDF | |
+| 4 | Reservas/contratos com cálculo no banco, disponibilidade, extras, entrega/devolução, km excedente, pagamentos e estornos, cauções, integração com financeiro, contrato em PDF PT/ES | ✅ concluída |
+| 5 | Inspeções de entrega/devolução, comparação, avarias com fotos, PDF | próxima |
 | 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | |
 | 7 | Manutenção (alertas por data/km), multas, sinistros | |
 | 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | |

@@ -89,10 +89,13 @@ insert into public.rentals (customer_id, vehicle_id, status, pickup_at, return_a
 values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'reservation',
         '2026-10-05 10:00+02', '2026-10-06 10:00+02', 45);
 
--- reserva cancelada não bloqueia o período
-insert into public.rentals (customer_id, vehicle_id, status, pickup_at, return_at, unit_price)
-values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'cancelled',
-        '2026-10-02 10:00+02', '2026-10-03 10:00+02', 45);
+-- reserva cancelada não bloqueia o período (contratos nascem como reserva/confirmado)
+insert into public.rentals (id, customer_id, vehicle_id, status, pickup_at, return_at, unit_price)
+values ('dddddddd-0000-0000-0000-000000000009', 'cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+        'reservation', '2026-10-20 10:00+02', '2026-10-21 10:00+02', 45);
+update public.rentals set status = 'cancelled', cancelled_reason = 'Cliente desistiu',
+       pickup_at = '2026-10-02 10:00+02', return_at = '2026-10-03 10:00+02'
+ where id = 'dddddddd-0000-0000-0000-000000000009';
 
 -- alterar datas de um contrato para conflitar também falha
 do $$ begin
@@ -152,9 +155,9 @@ do $$
 declare k jsonb;
 begin
   k := public.dashboard_kpis('2026-10-01', '2026-10-31');
-  assert (k ->> 'revenue')::numeric = 1000.30, 'receita deveria ser 1000.30, obtido ' || (k ->> 'revenue');
+  assert (k ->> 'revenue')::numeric = 1180.30, 'receita deveria ser 1180.30 (inclui contrato confirmado), obtido ' || (k ->> 'revenue');
   assert (k ->> 'expenses')::numeric = 300.05, 'despesa deveria ignorar compra de veículo e cancelados: ' || (k ->> 'expenses');
-  assert (k ->> 'operating_profit')::numeric = 700.25, 'lucro deveria ser 700.25';
+  assert (k ->> 'operating_profit')::numeric = 880.25, 'lucro deveria ser 880.25';
   assert (k ->> 'vehicles_total')::int = 2, 'total de veículos';
   assert (k ->> 'active_contracts')::int = 1, 'contratos ativos';
 end $$;
@@ -164,14 +167,14 @@ declare r record;
 begin
   select * into r from public.dashboard_vehicle_performance('2026-10-01', '2026-10-31')
   where vehicle_id = 'aaaaaaaa-0000-0000-0000-000000000001';
-  assert r.revenue = 1000.10 and r.expenses = 300.05 and r.profit = 700.05, 'desempenho por veículo';
+  assert r.revenue = 1180.10 and r.expenses = 300.05 and r.profit = 880.05, 'desempenho por veículo';
   -- contrato confirmado 01→05/10 = 4 dias (o de reserva não conta como ocupação)
   assert r.rented_days = 4, 'dias alugados deveria ser 4, obtido ' || r.rented_days;
   assert r.available_days = 31, 'dias disponíveis deveria ser 31';
   assert r.occupancy_pct = 12.9, 'ocupação deveria ser 12.9%, obtido ' || r.occupancy_pct;
 
   select * into r from public.dashboard_monthly('2026-09-01', '2026-10-31') where month = '2026-10-01';
-  assert r.revenue = 1000.30 and r.expenses = 300.05 and r.profit = 700.25, 'série mensal';
+  assert r.revenue = 1180.30 and r.expenses = 300.05 and r.profit = 880.25, 'série mensal';
   assert r.fleet_value = 37000.00, 'patrimônio = soma dos valores de compra sem avaliação: ' || r.fleet_value;
   assert (select count(*) from public.dashboard_monthly('2026-09-01', '2026-10-31')) = 2, 'dois meses';
 end $$;
