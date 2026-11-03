@@ -1,4 +1,5 @@
 import "server-only";
+import { mergeAlerts } from "./alerts";
 import { createClient } from "@/lib/supabase/server";
 import type { DateRange } from "@/lib/periods";
 
@@ -52,7 +53,8 @@ export type AlertKind =
   | "document_expired"
   | "payment_overdue"
   | "deposit_pending"
-  | "damage_open";
+  | "damage_open"
+  | "vehicle_uninsured";
 
 export type AlertSeverity = "critical" | "high" | "medium" | "low" | "info";
 
@@ -78,11 +80,12 @@ function isMissingFunction(err: { code?: string } | null) {
 
 export async function loadDashboard(period: DateRange, chart: DateRange): Promise<DashboardData> {
   const supabase = await createClient();
-  const [kpisRes, monthlyRes, vehiclesRes, alertsRes] = await Promise.all([
+  const [kpisRes, monthlyRes, vehiclesRes, alertsRes, extraRes] = await Promise.all([
     supabase.rpc("dashboard_kpis", { p_from: period.from, p_to: period.to }),
     supabase.rpc("dashboard_monthly", { p_from: chart.from, p_to: chart.to }),
     supabase.rpc("dashboard_vehicle_performance", { p_from: period.from, p_to: period.to }),
     supabase.rpc("dashboard_alerts", { p_limit: 12 }),
+    supabase.rpc("extra_alert_rows"),
   ]);
 
   const firstError = kpisRes.error ?? monthlyRes.error ?? vehiclesRes.error ?? alertsRes.error;
@@ -130,14 +133,14 @@ export async function loadDashboard(period: DateRange, chart: DateRange): Promis
     occupancy_pct: num(r.occupancy_pct),
   }));
 
-  const alerts = (alertsRes.data ?? []) as DashboardAlert[];
+  const alerts = mergeAlerts((alertsRes.data ?? []) as DashboardAlert[], extraRes.error ? [] : ((extraRes.data ?? []) as DashboardAlert[])).slice(0, 12);
   return { ok: true, kpis, monthly, vehicles, alerts };
 }
 
 /** Quantidade de alertas para o sino do cabeçalho. */
 export async function countAlerts(): Promise<number> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("dashboard_alerts", { p_limit: 100 });
-  if (error) return 0;
-  return Array.isArray(data) ? data.length : 0;
+  const [base, extra] = await Promise.all([supabase.rpc("dashboard_alerts", { p_limit: 100 }), supabase.rpc("extra_alert_rows")]);
+  if (base.error) return 0;
+  return (Array.isArray(base.data) ? base.data.length : 0) + (!extra.error && Array.isArray(extra.data) ? extra.data.length : 0);
 }

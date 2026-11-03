@@ -8,6 +8,9 @@ import { DamageList, InspectionList } from "@/components/inspections/lists";
 import { StartInspection } from "@/components/inspections/start-inspection";
 import { Button } from "@/components/ui/button";
 import { getI18n } from "@/lib/i18n/server";
+import { listPolicies } from "@/lib/insurance/queries";
+import { PolicyList } from "@/components/insurance/policy-list";
+import { InsuranceDialog } from "@/components/insurance/insurance-dialog";
 import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
 import {
@@ -15,7 +18,6 @@ import {
   getVehicleFinancials,
   listEntityHistory,
   listVehicleDocuments,
-  listVehicleInsurance,
   listVehiclePhotos,
   listVehicleRentals,
 } from "@/lib/vehicles/queries";
@@ -198,7 +200,7 @@ export default async function VehiclePage({
       {tab === "damages" && <DamagesTab id={id} mileage={v.current_mileage} archived={!!v.archived_at} />}
       {tab === "inspections" && <InspectionsTab id={id} archived={!!v.archived_at} />}
       {tab === "maintenance" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
-      {tab === "insurance" && <InsuranceTab id={id} />}
+      {tab === "insurance" && <InsuranceTab id={id} archived={!!v.archived_at} />}
       {tab === "documents" && (
         <VehicleDocuments
           vehicleId={id}
@@ -283,31 +285,22 @@ async function InspectionsTab({ id, archived }: { id: string; archived: boolean 
   );
 }
 
-async function InsuranceTab({ id }: { id: string }) {
-  const [{ t, locale }, rows] = await Promise.all([getI18n(), listVehicleInsurance(id)]);
-  if (rows.length === 0)
-    return (
-      <EmptyState icon={ShieldCheck} title={t.vehicles.insuranceEmpty}>
-        <p className="text-xs text-subtle">{interpolate(t.common.availableInPhase, { n: 6 })}</p>
-      </EmptyState>
-    );
+async function InsuranceTab({ id, archived }: { id: string; archived: boolean }) {
+  const [{ t, locale }, rows] = await Promise.all([getI18n(), listPolicies({ vehicleId: id })]);
+  const today = todayInMadrid();
   return (
-    <Card>
-      <ul className="divide-y divide-border">
-        {rows.map((p) => (
-          <li key={p.id} className="flex flex-wrap items-center gap-3 p-4 text-sm">
-            <span className="font-medium">{p.insurer}</span>
-            <span className="text-muted">
-              {t.vehicles.policy} {p.policy_number}
-            </span>
-            <span className="flex-1 text-xs text-muted tabular">
-              {formatDate(p.start_date)} → {formatDate(p.end_date)}
-            </span>
-            {p.premium_amount !== null && <span className="tabular">{formatCurrency(Number(p.premium_amount), locale)}</span>}
-          </li>
-        ))}
-      </ul>
-    </Card>
+    <div className="space-y-4">
+      {!archived && (
+        <div className="flex justify-end">
+          <InsuranceDialog values={{ vehicle_id: id }} />
+        </div>
+      )}
+      {rows.length === 0 ? (
+        <EmptyState icon={ShieldCheck} title={t.vehicles.insuranceEmpty} />
+      ) : (
+        <PolicyList rows={rows} t={t} locale={locale} today={today} showVehicle={false} />
+      )}
+    </div>
   );
 }
 

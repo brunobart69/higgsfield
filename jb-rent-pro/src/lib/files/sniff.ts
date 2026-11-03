@@ -7,7 +7,7 @@ export function sniffMime(bytes: Uint8Array): "application/pdf" | "image/png" | 
 }
 
 /** Caminho no bucket: <empresa>/<entidade>/<id>/<pasta>/<uuid>.<ext> */
-export function buildStoragePath(companyId: string, entity: "vehicles" | "customers", entityId: string, folder: string, ext: string) {
+export function buildStoragePath(companyId: string, entity: "vehicles" | "customers" | "rentals" | "company", entityId: string, folder: string, ext: string) {
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${companyId}/${entity}/${entityId}/${folder}/${id}.${ext}`;
 }

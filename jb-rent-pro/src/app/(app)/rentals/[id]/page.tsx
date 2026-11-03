@@ -17,6 +17,10 @@ import { PaymentsPanel } from "@/components/rentals/payments-panel";
 import { DepositPanel } from "@/components/rentals/deposit-panel";
 import { RentalInspectionsCard } from "@/components/inspections/rental-inspections-card";
 import { Badge } from "@/components/ui/badge";
+import { LinkedDocuments } from "@/components/documents/linked-documents";
+import { getSession } from "@/lib/auth/session";
+import { listLinkedDocuments } from "@/lib/documents/queries";
+import { todayInMadrid } from "@/lib/periods";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const r = await getRental((await params).id);
@@ -27,7 +31,13 @@ export default async function RentalPage({ params, searchParams }: { params: Pro
   const [{ t, locale }, { id }, sp] = await Promise.all([getI18n(), params, searchParams]);
   const r = await getRental(id);
   if (!r) notFound();
-  const [opts, history, users] = await Promise.all([getRentalFormOptions(), listEntityHistory(["rentals"], id, 30), listCompanyUsers()]);
+  const [opts, history, users, session, docs] = await Promise.all([
+    getRentalFormOptions(),
+    listEntityHistory(["rentals"], id, 30),
+    listCompanyUsers(),
+    getSession(),
+    listLinkedDocuments({ rentalId: id }),
+  ]);
   const names = users.ok ? Object.fromEntries(users.users.map((u) => [u.id, u.fullName ?? u.email])) : {};
   const rt = t.rentals;
   const c = r.customer;
@@ -209,6 +219,36 @@ export default async function RentalPage({ params, searchParams }: { params: Pro
             canAdd={r.status !== "reservation"}
           />
           {r.status !== "cancelled" && <RentalInspectionsCard rentalId={r.id} vehicleId={r.vehicle_id} status={r.status} />}
+          {session.status === "ok" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {t.docsCenter.rentalDocs}
+                  {r.signature_status === "signed" && <Badge variant="success">{t.docsCenter.signedOk}</Badge>}
+                </CardTitle>
+                <p className="text-xs text-muted">{t.docsCenter.signedContractHint}</p>
+              </CardHeader>
+              <CardContent>
+                <LinkedDocuments
+                  companyId={session.profile.companyId}
+                  target={{ kind: "rental", rentalId: r.id }}
+                  today={todayInMadrid()}
+                  categories={["contract", "receipt", "invoice", "other"]}
+                  buttonLabel={r.signature_status === "signed" ? t.docsCenter.upload : t.docsCenter.uploadSigned}
+                  emptyText={t.docsCenter.empty}
+                  docs={docs.map((d) => ({
+                    id: d.id,
+                    label: d.title,
+                    typeLabel: t.docsCenter.categories[d.category as keyof typeof t.docsCenter.categories] ?? d.category,
+                    mime_type: d.mime_type,
+                    size_bytes: d.size_bytes,
+                    expires_at: d.expires_at,
+                    created_at: d.created_at,
+                  }))}
+                />
+              </CardContent>
+            </Card>
+          )}
           <DepositPanel rentalId={r.id} agreed={r.deposit_amount} deposit={r.deposit} canEdit={r.status !== "cancelled" || (r.deposit?.status === "held")} />
         </div>
       </div>

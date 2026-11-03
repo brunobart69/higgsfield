@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, Download, Eye, FileImage, FileText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +20,13 @@ export type DocRow = {
   size_bytes: number | null;
   expires_at: string | null;
   created_at: string;
+  /** Vínculo exibido abaixo do título (veículo, contrato, apólice, cliente). */
+  link?: { href: string; label: string } | null;
+  /** Observação curta (ex.: prazo de retenção). */
+  note?: string;
+  noteTone?: "muted" | "warning";
+  /** Quando há onDelete, permite restringir a exclusão a algumas linhas. */
+  deletable?: boolean;
 };
 
 /** Lista de documentos com abrir/baixar via link temporário e arquivar/excluir com confirmação. */
@@ -77,6 +85,16 @@ export function DocumentList({
                   {d.size_bytes ? ` · ${formatBytes(d.size_bytes)}` : ""}
                   {` · ${formatDate(d.created_at)}`}
                 </p>
+                {(d.link || d.note) && (
+                  <p className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 text-xs">
+                    {d.link && (
+                      <Link href={d.link.href} className="min-w-0 truncate text-gold-light hover:underline">
+                        {d.link.label}
+                      </Link>
+                    )}
+                    {d.note && <span className={d.noteTone === "warning" ? "text-warning" : "text-subtle"}>{d.note}</span>}
+                  </p>
+                )}
               </div>
               <a
                 href={`/api/files/${kind}/${d.id}`}
@@ -104,7 +122,7 @@ export function DocumentList({
                   <Archive className="size-4" />
                 </button>
               )}
-              {onDelete && (
+              {onDelete && d.deletable !== false && (
                 <button
                   type="button"
                   onClick={() => setConfirm({ id: d.id, mode: "delete" })}

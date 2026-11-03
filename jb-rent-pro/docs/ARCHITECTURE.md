@@ -227,6 +227,29 @@ Abrir/baixar ─► /api/files/<tipo>/<id> ─► RLS confirma o acesso ─► l
 
 O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
 
+### 3.9 Seguros e documentos (migration 0006)
+
+- **Apólices**: o banco normaliza o número (maiúsculas), confere se o veículo é da empresa e impede
+  duplicidade (mesmo número e início). **Renovação** = nova apólice com `renewed_from_id`; só uma
+  renovação ativa por apólice, do mesmo veículo e começando até 31 dias antes do fim da anterior
+  (`RENEWAL_MISMATCH`). Apólice renovada deixa de gerar alerta.
+- **Prêmio**: lançado automaticamente em `financial_transactions` como despesa "Seguros" do veículo
+  (competência = início da vigência; "pago" quando `paid_at` é informado; anulado ao arquivar).
+  Apólices não são excluídas, apenas arquivadas.
+- **Situação** (`src/lib/insurance/status.ts`): futura, vigente, vencendo (≤ 30 dias, com faixas de
+  alerta 30/15/7), vencida, renovada, arquivada. Sugestão de renovação mantém meses completos.
+- **Alertas complementares** (`extra_alert_rows`): documentos de clientes vencendo/vencidos e
+  veículos em operação sem apólice vigente (crítico). Somados aos alertas do dashboard e ao sino.
+- **Documentos**: vínculo opcional com veículo, contrato ou apólice (validados na mesma empresa);
+  pastas `<empresa>/company/general`, `<empresa>/vehicles/<id>`, `<empresa>/rentals/<id>`.
+  `retention_until` = emissão (ou envio) + `companies.document_retention_years`. A exclusão
+  definitiva só é possível pelo administrador principal **depois** do prazo (`purge_document`),
+  e remove o arquivo do Storage; antes disso, apenas arquivar. Documentos pessoais de clientes
+  podem ser excluídos pelo dono a qualquer momento (RGPD).
+- **Contrato assinado**: enviar um documento da categoria "contrato" no contrato marca
+  `signature_status = 'signed'` (assinatura manuscrita digitalizada; assinatura eletrônica
+  qualificada fica para integração futura).
+
 ## 4. Fluxo de autenticação
 
 ```
@@ -294,8 +317,8 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 3 | Veículos (ficha com 9 abas, fotos, documentos, busca, arquivamento, histórico de valor) e clientes (PF/PJ, DNI/NIE validado, documentos pessoais, histórico, RGPD/anonimização), busca global | ✅ concluída |
 | 4 | Reservas/contratos com cálculo no banco, disponibilidade, extras, entrega/devolução, km excedente, pagamentos e estornos, cauções, integração com financeiro, contrato em PDF PT/ES | ✅ concluída |
 | 5 | Inspeções de entrega/devolução/periódicas com checklist e fotos, comparação, avarias com fotos e custos, relatórios PDF | ✅ concluída |
-| 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | próxima |
-| 7 | Manutenção (alertas por data/km), multas, sinistros | |
+| 6 | Seguros (renovações, alertas 30/15/7, prêmio como despesa, veículos sem seguro) e central de documentos (vínculos, retenção, contrato assinado) | ✅ concluída |
+| 7 | Manutenção (alertas por data/km), multas, sinistros | próxima |
 | 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | |
 | 9 | Calendário inteligente, notificações, área do cliente | |
 | 10 | Relatórios CSV/PDF, testes E2E, revisão de segurança, publicação | |

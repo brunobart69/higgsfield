@@ -150,17 +150,6 @@ export async function listVehicleRentals(vehicleId: string) {
   });
 }
 
-export async function listVehicleInsurance(vehicleId: string) {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("insurance_policies")
-    .select("id, insurer, policy_number, coverage_type, start_date, end_date, premium_amount")
-    .eq("vehicle_id", vehicleId)
-    .is("archived_at", null)
-    .order("end_date", { ascending: false });
-  return data ?? [];
-}
-
 export type VehicleFinancials = {
   revenue: number;
   expenses: number;

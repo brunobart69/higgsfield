@@ -46,5 +46,8 @@ npm run dev
   devolução, km excedente), pagamentos e estornos, cauções fora da receita e contrato em PDF PT/ES.
 - **Fase 5 ✅** — inspeções de entrega, devolução e periódicas com checklist por área e fotos da câmera,
   comparação automática, avarias com fotos e custos e relatórios em PDF.
+- **Fase 6 ✅** — seguros (apólices, renovações encadeadas, alertas 30/15/7, veículos sem seguro,
+  prêmio lançado como despesa) e central de documentos (empresa, frota, contratos e clientes,
+  vínculos, retenção configurável, contrato assinado digitalizado).
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.

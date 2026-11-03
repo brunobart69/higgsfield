@@ -19,6 +19,7 @@ export function mapDbError(err: { code?: string; message?: string } | null | und
   if (msg.includes("INSPECTION_RENTAL_NOT_ACTIVE")) return "inspectionRentalNotActive";
   if (msg.includes("INSPECTION_DATA_REQUIRED")) return "inspectionDataRequired";
   if (msg.includes("DAMAGE_RENTAL_MISMATCH")) return "damageRentalMismatch";
+  if (msg.includes("RENEWAL_MISMATCH")) return "renewalMismatch";
   if (msg.includes("CUSTOMER_HAS_ACTIVE_RENTALS")) return "customerHasActiveRentals";
   switch (err.code) {
     case "42501":

@@ -14,6 +14,27 @@ const severityStyle: Record<AlertSeverity, { variant: "danger" | "warning" | "in
   info: { variant: "info", icon: BellRing },
 };
 
+function alertHref(a: DashboardAlert): string | null {
+  switch (a.entity) {
+    case "rentals":
+      return `/rentals/${a.entity_id}`;
+    case "vehicles":
+      return a.kind === "vehicle_uninsured" ? `/vehicles/${a.entity_id}?tab=insurance` : `/vehicles/${a.entity_id}`;
+    case "insurance_policies":
+      return `/insurance/${a.entity_id}`;
+    case "documents":
+      return "/documents?status=expiring";
+    case "customer_documents":
+      return `/customers/${a.entity_id}?tab=documents`;
+    case "deposits":
+      return "/deposits";
+    case "damages":
+      return `/damages/${a.entity_id}`;
+    default:
+      return null;
+  }
+}
+
 function AlertRow({ href, children }: { href: string | null; children: React.ReactNode }) {
   const cls = "-mx-2 flex items-start gap-3 rounded-md px-2 py-1";
   return href ? (
@@ -46,7 +67,7 @@ export function AlertsPanel({ alerts, t }: { alerts: DashboardAlert[]; t: Dictio
               const s = severityStyle[a.severity] ?? severityStyle.info;
               const Icon = s.icon;
               const href =
-                a.entity === "rentals" ? `/rentals/${a.entity_id}` : a.entity === "vehicles" ? `/vehicles/${a.entity_id}` : a.entity === "deposits" ? "/deposits" : a.entity === "damages" ? `/damages/${a.entity_id}` : null;
+                alertHref(a);
               return (
                 <li key={`${a.kind}-${a.entity_id}`} className="py-3 first:pt-0 last:pb-0">
                   <AlertRow href={href}>
