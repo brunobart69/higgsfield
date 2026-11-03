@@ -6,12 +6,12 @@ import { formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/
 import type { RentalDetail } from "@/lib/rentals/queries";
 import type { CompanySettings } from "@/lib/settings/queries";
 
-const A4 = { w: 595.28, h: 841.89 };
-const M = 48; // margem
-const GOLD = rgb(0.69, 0.55, 0.2);
-const INK = rgb(0.1, 0.1, 0.11);
-const MUTED = rgb(0.42, 0.42, 0.45);
-const LINE = rgb(0.85, 0.85, 0.87);
+export const A4 = { w: 595.28, h: 841.89 };
+export const M = 48; // margem
+export const GOLD = rgb(0.69, 0.55, 0.2);
+export const INK = rgb(0.1, 0.1, 0.11);
+export const MUTED = rgb(0.42, 0.42, 0.45);
+export const LINE = rgb(0.85, 0.85, 0.87);
 
 /**
  * As fontes padrão do PDF usam a codificação WinAnsi, que cobre português e
@@ -29,19 +29,19 @@ export function pdfSafe(text: string): string {
     .replace(/[^\x20-\x7e¡-ÿ€–—‘’“”•…\n]/g, "");
 }
 
-type Ctx = { doc: PDFDocument; page: PDFPage; y: number; font: PDFFont; bold: PDFFont; footer: string; pages: PDFPage[] };
+export type Ctx = { doc: PDFDocument; page: PDFPage; y: number; font: PDFFont; bold: PDFFont; footer: string; pages: PDFPage[] };
 
-function newPage(ctx: Ctx) {
+export function newPage(ctx: Ctx) {
   ctx.page = ctx.doc.addPage([A4.w, A4.h]);
   ctx.pages.push(ctx.page);
   ctx.y = A4.h - M;
 }
 
-function ensure(ctx: Ctx, needed: number) {
+export function ensure(ctx: Ctx, needed: number) {
   if (ctx.y - needed < M + 30) newPage(ctx);
 }
 
-function wrap(text: string, font: PDFFont, size: number, width: number): string[] {
+export function wrap(text: string, font: PDFFont, size: number, width: number): string[] {
   const out: string[] = [];
   for (const para of pdfSafe(text).split("\n")) {
     const words = para.split(/\s+/).filter(Boolean);
@@ -63,7 +63,7 @@ function wrap(text: string, font: PDFFont, size: number, width: number): string[
   return out;
 }
 
-function paragraph(ctx: Ctx, text: string, opts: { size?: number; color?: ReturnType<typeof rgb>; font?: PDFFont; x?: number; width?: number; gap?: number } = {}) {
+export function paragraph(ctx: Ctx, text: string, opts: { size?: number; color?: ReturnType<typeof rgb>; font?: PDFFont; x?: number; width?: number; gap?: number } = {}) {
   const size = opts.size ?? 9.5;
   const font = opts.font ?? ctx.font;
   const x = opts.x ?? M;
@@ -77,7 +77,7 @@ function paragraph(ctx: Ctx, text: string, opts: { size?: number; color?: Return
   ctx.y -= opts.gap ?? 4;
 }
 
-function heading(ctx: Ctx, text: string) {
+export function heading(ctx: Ctx, text: string) {
   ensure(ctx, 34);
   ctx.y -= 8;
   ctx.page.drawText(pdfSafe(text).toUpperCase(), { x: M, y: ctx.y - 9, size: 9, font: ctx.bold, color: GOLD });
@@ -87,7 +87,7 @@ function heading(ctx: Ctx, text: string) {
 }
 
 /** Pares rótulo/valor em duas colunas. */
-function fields(ctx: Ctx, items: Array<[string, string | null | undefined]>, cols = 2) {
+export function fields(ctx: Ctx, items: Array<[string, string | null | undefined]>, cols = 2) {
   const width = (A4.w - 2 * M) / cols;
   const rows = items.filter(([, v]) => v);
   for (let i = 0; i < rows.length; i += cols) {
@@ -106,7 +106,7 @@ function fields(ctx: Ctx, items: Array<[string, string | null | undefined]>, col
   }
 }
 
-function moneyRow(ctx: Ctx, label: string, value: string, strong = false) {
+export function moneyRow(ctx: Ctx, label: string, value: string, strong = false) {
   ensure(ctx, 16);
   const f = strong ? ctx.bold : ctx.font;
   const size = strong ? 11 : 9.5;
@@ -114,6 +114,58 @@ function moneyRow(ctx: Ctx, label: string, value: string, strong = false) {
   const v = pdfSafe(value);
   ctx.page.drawText(v, { x: A4.w - M - f.widthOfTextAtSize(v, size), y: ctx.y - size, size, font: f, color: INK });
   ctx.y -= size + 6;
+}
+
+/** Cabeçalho com logotipo e dados da empresa + faixa com título e número. */
+export async function drawDocHeader(ctx: Ctx, opts: { company: CompanySettings; logo: { bytes: Uint8Array; type: "png" | "jpg" } | null; title: string; reference: string; issuedLabel: string; taxLabel: string }) {
+  const { company: co } = opts;
+  let logo: PDFImage | null = null;
+  if (opts.logo) {
+    try {
+      logo = opts.logo.type === "png" ? await ctx.doc.embedPng(opts.logo.bytes) : await ctx.doc.embedJpg(opts.logo.bytes);
+    } catch {
+      logo = null;
+    }
+  }
+  let textX = M;
+  if (logo) {
+    const scale = Math.min(110 / logo.width, 48 / logo.height);
+    ctx.page.drawImage(logo, { x: M, y: ctx.y - logo.height * scale, width: logo.width * scale, height: logo.height * scale });
+    textX = M + logo.width * scale + 14;
+  }
+  ctx.page.drawText(pdfSafe(co.legal_name || co.name), { x: textX, y: ctx.y - 14, size: 13, font: ctx.bold, color: INK });
+  const coLine = [co.tax_id && `${opts.taxLabel} ${co.tax_id}`, [co.address, co.postal_code, co.city].filter(Boolean).join(", "), co.phone, co.email].filter(Boolean).join("  ·  ");
+  wrap(coLine, ctx.font, 8, A4.w - M - textX).forEach((line, i) => ctx.page.drawText(line, { x: textX, y: ctx.y - 28 - i * 11, size: 8, font: ctx.font, color: MUTED }));
+  ctx.y -= 62;
+  ctx.page.drawRectangle({ x: M, y: ctx.y - 40, width: A4.w - 2 * M, height: 40, color: rgb(0.97, 0.96, 0.93), borderColor: GOLD, borderWidth: 0.6 });
+  ctx.page.drawText(pdfSafe(opts.title), { x: M + 12, y: ctx.y - 17, size: 12, font: ctx.bold, color: INK });
+  const ref = pdfSafe(opts.reference);
+  ctx.page.drawText(ref, { x: A4.w - M - 12 - ctx.bold.widthOfTextAtSize(ref, 11), y: ctx.y - 17, size: 11, font: ctx.bold, color: GOLD });
+  const issued = pdfSafe(opts.issuedLabel);
+  ctx.page.drawText(issued, { x: A4.w - M - 12 - ctx.font.widthOfTextAtSize(issued, 8), y: ctx.y - 31, size: 8, font: ctx.font, color: MUTED });
+  ctx.y -= 52;
+}
+
+/** Rodapé com texto e paginação em todas as páginas. */
+export function drawFooters(ctx: Ctx, reference: string, pageLabel: string) {
+  const total = ctx.pages.length;
+  ctx.pages.forEach((p, i) => {
+    const footer = pdfSafe([ctx.footer, reference, interpolate(pageLabel, { n: i + 1, total })].filter(Boolean).join("  ·  "));
+    const lines = wrap(footer, ctx.font, 7, A4.w - 2 * M);
+    lines.forEach((line, k) => p.drawText(line, { x: M, y: 26 + (lines.length - 1 - k) * 9, size: 7, font: ctx.font, color: MUTED }));
+  });
+}
+
+export async function newDoc(title: string, author: string, locale: string, footer: string): Promise<Ctx> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(title);
+  doc.setAuthor(author);
+  doc.setCreator("JB RENT PRO");
+  doc.setLanguage(locale);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([A4.w, A4.h]);
+  return { doc, page, y: A4.h - M, font, bold, footer, pages: [page] };
 }
 
 export async function buildContractPdf(input: {

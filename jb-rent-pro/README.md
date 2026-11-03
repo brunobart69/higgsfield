@@ -44,5 +44,7 @@ npm run dev
   clientes pessoa física e jurídica (DNI/NIE validado, documentos pessoais, anonimização RGPD) e busca global.
 - **Fase 4 ✅** — reservas e contratos (cálculo no banco, disponibilidade em tempo real, extras, entrega e
   devolução, km excedente), pagamentos e estornos, cauções fora da receita e contrato em PDF PT/ES.
+- **Fase 5 ✅** — inspeções de entrega, devolução e periódicas com checklist por área e fotos da câmera,
+  comparação automática, avarias com fotos e custos e relatórios em PDF.
 
 Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.

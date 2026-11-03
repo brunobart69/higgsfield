@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CarFront, FileText, Plus, Receipt, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CarFront, ClipboardCheck, FileText, Plus, Receipt, ShieldCheck } from "lucide-react";
+import { listDamages, listInspections } from "@/lib/inspections/queries";
+import { DamageDialog } from "@/components/inspections/damage-dialog";
+import { DamageList, InspectionList } from "@/components/inspections/lists";
+import { StartInspection } from "@/components/inspections/start-inspection";
 import { Button } from "@/components/ui/button";
 import { getI18n } from "@/lib/i18n/server";
 import { interpolate } from "@/lib/i18n/config";
@@ -191,8 +195,8 @@ export default async function VehiclePage({
       )}
 
       {tab === "rentals" && <RentalsTab id={id} />}
-      {tab === "damages" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 5 })} />}
-      {tab === "inspections" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 5 })} />}
+      {tab === "damages" && <DamagesTab id={id} mileage={v.current_mileage} archived={!!v.archived_at} />}
+      {tab === "inspections" && <InspectionsTab id={id} archived={!!v.archived_at} />}
       {tab === "maintenance" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
       {tab === "insurance" && <InsuranceTab id={id} />}
       {tab === "documents" && (
@@ -248,6 +252,34 @@ async function RentalsTab({ id }: { id: string }) {
         ))}
       </ul>
     </Card>
+  );
+}
+
+async function DamagesTab({ id, mileage, archived }: { id: string; mileage: number; archived: boolean }) {
+  const [{ t }, res] = await Promise.all([getI18n(), listDamages({ vehicleId: id, limit: 100 })]);
+  return (
+    <div className="space-y-4">
+      {!archived && (
+        <div className="flex justify-end">
+          <DamageDialog values={{ vehicle_id: id, mileage }} />
+        </div>
+      )}
+      {res.items.length === 0 ? <EmptyState icon={AlertTriangle} title={t.damages.empty} /> : <DamageList items={res.items} showVehicle={false} />}
+    </div>
+  );
+}
+
+async function InspectionsTab({ id, archived }: { id: string; archived: boolean }) {
+  const [{ t }, res] = await Promise.all([getI18n(), listInspections({ vehicleId: id, limit: 100 })]);
+  return (
+    <div className="space-y-4">
+      {!archived && (
+        <div className="flex justify-end">
+          <StartInspection vehicleId={id} type="periodic" label={t.inspections.newPeriodic} />
+        </div>
+      )}
+      {res.items.length === 0 ? <EmptyState icon={ClipboardCheck} title={t.inspections.empty} /> : <InspectionList items={res.items} showVehicle={false} />}
+    </div>
   );
 }
 

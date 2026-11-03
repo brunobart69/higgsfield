@@ -46,7 +46,7 @@ export function AlertsPanel({ alerts, t }: { alerts: DashboardAlert[]; t: Dictio
               const s = severityStyle[a.severity] ?? severityStyle.info;
               const Icon = s.icon;
               const href =
-                a.entity === "rentals" ? `/rentals/${a.entity_id}` : a.entity === "vehicles" ? `/vehicles/${a.entity_id}` : a.entity === "deposits" ? "/deposits" : null;
+                a.entity === "rentals" ? `/rentals/${a.entity_id}` : a.entity === "vehicles" ? `/vehicles/${a.entity_id}` : a.entity === "deposits" ? "/deposits" : a.entity === "damages" ? `/damages/${a.entity_id}` : null;
               return (
                 <li key={`${a.kind}-${a.entity_id}`} className="py-3 first:pt-0 last:pb-0">
                   <AlertRow href={href}>

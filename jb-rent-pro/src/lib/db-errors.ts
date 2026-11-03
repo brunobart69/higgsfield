@@ -14,6 +14,11 @@ export function mapDbError(err: { code?: string; message?: string } | null | und
   if (msg.includes("RENTAL_LOCKED")) return "rentalLocked";
   if (msg.includes("DISCOUNT_TOO_HIGH")) return "discountTooHigh";
   if (msg.includes("PAYMENT_IMMUTABLE")) return "paymentImmutable";
+  if (msg.includes("INSPECTION_LOCKED")) return "inspectionLocked";
+  if (msg.includes("INSPECTION_RENTAL_MISMATCH")) return "inspectionRentalMismatch";
+  if (msg.includes("INSPECTION_RENTAL_NOT_ACTIVE")) return "inspectionRentalNotActive";
+  if (msg.includes("INSPECTION_DATA_REQUIRED")) return "inspectionDataRequired";
+  if (msg.includes("DAMAGE_RENTAL_MISMATCH")) return "damageRentalMismatch";
   if (msg.includes("CUSTOMER_HAS_ACTIVE_RENTALS")) return "customerHasActiveRentals";
   switch (err.code) {
     case "42501":

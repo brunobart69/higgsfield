@@ -47,3 +47,35 @@ export async function discardUpload(path: string) {
     /* ignora */
   }
 }
+
+/**
+ * Envia várias fotos em sequência: reduz, envia ao Storage e registra no
+ * servidor. Se o registro falhar, o arquivo enviado é descartado.
+ */
+export async function uploadImages(
+  files: File[],
+  pathFor: (mime: "image/jpeg" | "image/png") => string,
+  register: (path: string, size: number, mime: "image/jpeg" | "image/png") => Promise<{ ok?: boolean; error?: string }>,
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ ok: number; errors: string[] }> {
+  const list = files.filter((f) => f.type === "image/jpeg" || f.type === "image/png");
+  let ok = 0;
+  const errors: string[] = [];
+  for (const [i, file] of list.entries()) {
+    const blob = await compressImage(file);
+    const mime = blob.type === "image/png" ? "image/png" : "image/jpeg";
+    const path = pathFor(mime);
+    const up = await uploadToStorage(path, blob, mime);
+    if (!up.ok) errors.push(up.error);
+    else {
+      const res = await register(path, blob.size, mime);
+      if (res.ok) ok++;
+      else {
+        await discardUpload(path);
+        errors.push(res.error ?? "uploadFailed");
+      }
+    }
+    onProgress?.(i + 1, list.length);
+  }
+  return { ok, errors };
+}

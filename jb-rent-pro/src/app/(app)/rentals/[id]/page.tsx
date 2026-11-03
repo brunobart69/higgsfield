@@ -15,6 +15,7 @@ import { RentalStatusBadge } from "@/components/rentals/rental-status-badge";
 import { RentalActions } from "@/components/rentals/rental-actions";
 import { PaymentsPanel } from "@/components/rentals/payments-panel";
 import { DepositPanel } from "@/components/rentals/deposit-panel";
+import { RentalInspectionsCard } from "@/components/inspections/rental-inspections-card";
 import { Badge } from "@/components/ui/badge";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -207,6 +208,7 @@ export default async function RentalPage({ params, searchParams }: { params: Pro
             defaultMethod={r.payment_method}
             canAdd={r.status !== "reservation"}
           />
+          {r.status !== "cancelled" && <RentalInspectionsCard rentalId={r.id} vehicleId={r.vehicle_id} status={r.status} />}
           <DepositPanel rentalId={r.id} agreed={r.deposit_amount} deposit={r.deposit} canEdit={r.status !== "cancelled" || (r.deposit?.status === "held")} />
         </div>
       </div>

@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Building2, FileText, Plus, ShieldCheck, User, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { listCustomerDeposits } from "@/lib/rentals/queries";
+import { listDamages } from "@/lib/inspections/queries";
+import { DamageList } from "@/components/inspections/lists";
 import { getI18n } from "@/lib/i18n/server";
 import { interpolate } from "@/lib/i18n/config";
 import { getSession } from "@/lib/auth/session";
@@ -232,7 +234,7 @@ export default async function CustomerPage({
       {tab === "payments" && <PaymentsTab id={id} />}
       {tab === "deposits" && <DepositsTab id={id} />}
       {tab === "fines" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 7 })} />}
-      {tab === "damages" && <PhaseNotice text={interpolate(t.common.availableInPhase, { n: 5 })} />}
+      {tab === "damages" && <DamagesTab id={id} />}
       {tab === "documents" && (
         <CustomerDocuments
           customerId={id}
@@ -311,6 +313,12 @@ async function DepositsTab({ id }: { id: string }) {
       </ul>
     </Card>
   );
+}
+
+async function DamagesTab({ id }: { id: string }) {
+  const [{ t }, res] = await Promise.all([getI18n(), listDamages({ customerId: id, limit: 100 })]);
+  if (res.items.length === 0) return <EmptyState icon={FileText} title={t.damages.empty} />;
+  return <DamageList items={res.items} />;
 }
 
 async function PaymentsTab({ id }: { id: string }) {

@@ -103,8 +103,10 @@ Futuros módulos seguem o mesmo padrão: `src/app/(app)/<modulo>/` (páginas + `
 | ✅ `rental_payments` | 4 | Pagamentos e estornos do contrato (fluxo de caixa); nunca alterados, só anulados com motivo |
 | ✅ `rental_extras` | 4 | Extras do contrato (catálogo ou livres), por aluguel ou por dia |
 | ✅ `deposits` | 4 | Cauções: recebido, devolvido, retido (com motivo), saldo e situação calculados — **fora da receita** |
-| `inspections` / `inspection_items` | 5 | Inspeção de entrega e devolução, comparação |
-| `damages` | 5 | Avarias com gravidade, custos estimado/real, status |
+| ✅ `inspections` | 5 | Entrega, devolução e periódica; checklist por área (jsonb validado no banco), km, combustível, cliente presente; concluída = evidência imutável |
+| ✅ `inspection_photos` | 5 | Fotos por área da inspeção (bloqueadas após a conclusão) |
+| ✅ `damages` | 5 | Avarias: área, categoria, gravidade, custos estimado/real, oficina, situação; ligadas a veículo, contrato, cliente e inspeção |
+| ✅ `damage_photos` | 5 | Fotos de cada avaria |
 | `maintenance_records` | 7 | Preventiva/corretiva, próxima revisão por data/km |
 | `fines` | 7 | Multas |
 | `accidents` | 7 | Sinistros |
@@ -201,7 +203,18 @@ gerado no servidor com `pdf-lib`, com logotipo, partes, veículo, período, valo
 quilometragem, combustível, condições cadastradas e campos de assinatura; `rentals.signature_status`
 e `signature_provider_ref` preparam a integração futura com assinatura eletrônica.
 
-### 3.7 Envio de arquivos
+### 3.7 Inspeções e avarias
+
+- Uma inspeção de entrega e uma de devolução por contrato (índice único); a de devolução só depois da entrega.
+- Concluir a **inspeção de entrega** registra a entrega do contrato com a km e o combustível da inspeção
+  (o veículo passa a "alugado"). A devolução do contrato continua no fluxo do contrato (km excedente, atraso).
+- Inspeção concluída não pode ser alterada nem excluída, nem suas fotos; rascunhos podem ser descartados.
+- A **comparação** (`compareInspections`) marca as áreas cujo estado piorou entre entrega e devolução
+  (OK → marca leve → avaria) como possível nova avaria, com fotos lado a lado e atalho para registrar a avaria.
+- Relatórios em PDF: inspeção (checklist, fotos, avarias, assinaturas) e comparação entrega × devolução.
+- Avarias graves (alta/crítica) em aberto geram alerta no dashboard.
+
+### 3.8 Envio de arquivos
 
 ```
 Navegador ─ reduz fotos para ≤ 2000 px (JPEG) ─► upload direto ao Storage privado (RLS da pasta da empresa)
@@ -280,8 +293,8 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 2 | Usuários (convite, cargos, desativação, link de senha), configurações da empresa (dados, fiscal, preços padrão, contrato, taxas, logotipo), perfil próprio, histórico de acessos e registro de atividades | ✅ concluída |
 | 3 | Veículos (ficha com 9 abas, fotos, documentos, busca, arquivamento, histórico de valor) e clientes (PF/PJ, DNI/NIE validado, documentos pessoais, histórico, RGPD/anonimização), busca global | ✅ concluída |
 | 4 | Reservas/contratos com cálculo no banco, disponibilidade, extras, entrega/devolução, km excedente, pagamentos e estornos, cauções, integração com financeiro, contrato em PDF PT/ES | ✅ concluída |
-| 5 | Inspeções de entrega/devolução, comparação, avarias com fotos, PDF | próxima |
-| 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | |
+| 5 | Inspeções de entrega/devolução/periódicas com checklist e fotos, comparação, avarias com fotos e custos, relatórios PDF | ✅ concluída |
+| 6 | Seguros (renovações, alertas 30/15/7) e central de documentos | próxima |
 | 7 | Manutenção (alertas por data/km), multas, sinistros | |
 | 8 | Financeiro completo, contas a pagar/receber, fluxo de caixa, patrimônio e ROI | |
 | 9 | Calendário inteligente, notificações, área do cliente | |

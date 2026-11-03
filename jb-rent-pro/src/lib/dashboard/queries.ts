@@ -51,7 +51,8 @@ export type AlertKind =
   | "document_expiring"
   | "document_expired"
   | "payment_overdue"
-  | "deposit_pending";
+  | "deposit_pending"
+  | "damage_open";
 
 export type AlertSeverity = "critical" | "high" | "medium" | "low" | "info";
 

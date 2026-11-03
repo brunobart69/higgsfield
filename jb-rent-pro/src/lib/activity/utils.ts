@@ -12,6 +12,7 @@ export const ACTIVITY_ACTIONS = [
   "company.logo_updated",
   "customer.anonymized",
   "file.downloaded",
+  "report.generated",
 ] as const;
 
 export type ActivityEntry = {
