@@ -322,6 +322,17 @@ O envio direto evita o limite de 4,5 MB do corpo das funções da Vercel.
 - **Solicitações de reserva** (`rental_requests`): criadas pelo cliente (`portal_request_rental`, até 5
   abertas), notificam a equipe e são tratadas em Notificações (criar reserva já preenchida).
 
+### 3.13 Relatórios e testes E2E (fase 10)
+
+- Motor único (`src/lib/reports`): cada relatório vira um `ReportDoc` (seções = tabelas tipadas), exibido
+  na tela e exportado em **CSV** (separador `;`, decimal com vírgula, UTF‑8 com BOM, fórmulas
+  neutralizadas) ou **PDF** (A4 retrato/paisagem, cabeçalho repetido, numeração de páginas).
+- Relatórios: resultado (competência/caixa), lançamentos, fluxo de caixa, contas a receber/pagar,
+  contratos, desempenho da frota, rentabilidade e patrimônio, manutenções, multas e cauções em aberto.
+  Usam as mesmas funções do banco das telas (mesmos números) e respeitam a RLS.
+- `/api/reports/[key]?format=csv|pdf` exige sessão da equipe e registra `report.generated`.
+- E2E (`e2e/`): Supabase simulado com dados fictícios + Playwright percorrendo todas as telas.
+
 ## 4. Fluxo de autenticação
 
 ```
@@ -379,6 +390,7 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 - Parâmetros fiscais (IVA etc.) são **configuráveis** (`companies.vat_rate`, `financial_transactions.vat_rate`)
   — nenhuma regra tributária é presumida; devem ser definidos com o gestor/assessor fiscal.
 - Backups: Supabase faz backups diários (planos pagos; PITR opcional). Ver docs/SETUP.md.
+- Revisão completa, verificações automáticas e aspectos legais/fiscais: [docs/SECURITY.md](SECURITY.md).
 
 ## 7. Plano de implementação
 
@@ -393,4 +405,4 @@ qualquer operação; páginas exclusivas do administrador principal (Usuários, 
 | 7 | Manutenção (planos por data/km, oficina, custos), multas (identificação do condutor, repasse) e sinistros (franquia, indenização) | ✅ concluída |
 | 8 | Financeiro completo (competência × caixa), lançamentos e parcelas, contas a pagar/receber, fluxo de caixa com saldo e previsão, patrimônio, ROI e venda de veículos | ✅ concluída |
 | 9 | Calendário (mês, linha do tempo da frota, disponibilidade), notificações persistentes e área do cliente (login por código, contratos, pagamentos, documentos, solicitações) | ✅ concluída |
-| 10 | Relatórios CSV/PDF, testes E2E, revisão de segurança, publicação | |
+| 10 | Relatórios com exportação CSV/PDF, testes E2E, revisão e testes automáticos de segurança, endurecimento e guia de publicação | ✅ concluída |

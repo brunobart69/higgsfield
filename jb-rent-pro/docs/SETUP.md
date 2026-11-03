@@ -58,7 +58,8 @@ Todas ficam em **Supabase → Project Settings → API / API Keys**.
      `20261105000001_vehicles_customers.sql`, `20261106000001_rentals.sql`, `20261107000001_inspections_damages.sql`,
      `20261108000001_insurance_documents.sql`, `20261109000001_finance_categories.sql`,
      `20261109000002_maintenance_fines_accidents.sql`, `20261110000001_finance_enums.sql`,
-     `20261110000002_finance.sql`, `20261111000001_calendar_notifications_portal.sql`); ou
+     `20261110000002_finance.sql`, `20261111000001_calendar_notifications_portal.sql`,
+     `20261112000001_hardening.sql`); ou
    - **CLI**: `npx supabase login && npx supabase link --project-ref SEU_REF && npx supabase db push`.
 6. Crie o **administrador principal**: *Authentication → Users → Add user → Create new user* (e‑mail +
    senha, marque *Auto Confirm*). O primeiro usuário vira automaticamente "Administrador principal" e cria
@@ -82,19 +83,41 @@ Sem as variáveis o app abre a tela **/setup** explicando o que falta.
 ### Testes
 
 ```bash
-npm test          # unitários: períodos/fuso, dinheiro, formatação, traduções, validação
+npm test          # unitários + verificações estáticas de segurança (guardas, segredos, rotas)
 npm run typecheck
 npm run lint
 npm run test:db   # migrations + RLS + conflitos + cálculos num PostgreSQL local descartável
                   # (requer psql/createdb; ex.: PGTEST_SUPERUSER=postgres npm run test:db)
+                  # inclui a auditoria de segurança do banco (RLS, anon, SECURITY DEFINER)
+npm run test:e2e  # build com Supabase simulado + navegação real por todas as telas (computador e
+                  # celular): erros de página, rolagem horizontal, rotas protegidas, CSV/PDF.
+                  # Requer Playwright + Chromium (npm i -D playwright && npx playwright install chromium)
 ```
 
 ## 5. Publicação na Vercel
 
 1. *Add New → Project* → importe o repositório.
-2. **Root Directory**: `jb-rent-pro`. Framework: Next.js (detectado).
-3. *Environment Variables*: as três `NEXT_PUBLIC_*` (Production e Preview).
-4. Deploy. Depois, configure o domínio e atualize *Site URL* / *Redirect URLs* no Supabase.
+2. **Root Directory**: `jb-rent-pro`. Framework: Next.js (detectado). Node 20 ou superior.
+3. *Settings → Functions → Region*: escolha uma região da UE (ex.: **Frankfurt `fra1`**) — mais perto do
+   Supabase e adequado ao RGPD.
+4. *Environment Variables*:
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL` → Production e Preview.
+   - `SUPABASE_SERVICE_ROLE_KEY` → **somente Production** (e Preview apenas se usar um projeto Supabase de
+     testes). Marque como *Sensitive*. Cadastre você mesmo, nunca por chat.
+5. Deploy. Configure o domínio (*Settings → Domains*), atualize `NEXT_PUBLIC_SITE_URL` e, no Supabase,
+   *Site URL* e *Redirect URLs* (`https://SEU-DOMINIO/auth/confirm`). Faça um novo deploy.
+6. Primeiro acesso: crie o administrador principal (passo 6 da seção 3), entre, complete **Configurações** e
+   convide o segundo administrador. Teste: login, recuperação de senha, uma reserva completa (entrega,
+   devolução, pagamento, caução), contrato em PDF, envio de documento e a área do cliente com um cliente
+   de teste.
+7. Siga o **checklist de publicação** em [docs/SECURITY.md](SECURITY.md#7-checklist-antes-de-publicar).
+
+### Atualizações
+
+- Novas versões: merge na branch de produção → a Vercel publica sozinha. Migrations novas: aplique no
+  Supabase **antes** do deploy (são aditivas e compatíveis com a versão anterior).
+- Antes de cada atualização: `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:db`,
+  `npm run test:e2e` e `npm audit`.
 
 ## 6. Instalar como aplicativo (PWA)
 
@@ -106,4 +129,6 @@ npm run test:db   # migrations + RLS + conflitos + cálculos num PostgreSQL loca
 - Plano Pro: backups diários automáticos (7 dias). Para mais segurança, ative PITR ou agende
   `pg_dump` semanal para um armazenamento europeu.
 - Defina com o assessor jurídico/fiscal os prazos de retenção de contratos, faturas e documentos
-  pessoais; o campo `documents.retention_until` já existe para aplicá‑los.
+  pessoais e configure-os em **Configurações**; a central de documentos aplica o prazo
+  (`retention_until`) e só permite excluir depois dele.
+- Exportações periódicas para o contador: **Relatórios** → CSV/PDF (lançamentos, resultado, contratos…).

@@ -36,7 +36,7 @@ export type NavItem = {
 export type NavGroup = { key: GroupKey; items: NavItem[] };
 
 /** Fase atualmente implantada. Atualize ao concluir cada fase. */
-export const CURRENT_PHASE = 9;
+export const CURRENT_PHASE = 10;
 
 export const NAV: NavGroup[] = [
   {

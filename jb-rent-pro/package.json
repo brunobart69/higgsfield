@@ -2,7 +2,7 @@
   "name": "jb-rent-pro",
   "version": "0.1.0",
   "private": true,
-  "description": "JB RENT PRO — Sistema profissional de gestão de aluguel de veículos",
+  "description": "JB RENT PRO \u2014 Sistema profissional de gest\u00e3o de aluguel de ve\u00edculos",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:db": "bash supabase/tests/run-local.sh"
+    "test:db": "bash supabase/tests/run-local.sh",
+    "test:e2e": "bash e2e/run.sh"
   },
   "engines": {
     "node": ">=20.9"
@@ -46,5 +47,10 @@
     "tailwindcss": "^4.3.4",
     "typescript": "^6.0.3",
     "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.32"
+    }
   }
 }

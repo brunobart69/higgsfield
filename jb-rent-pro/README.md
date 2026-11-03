@@ -13,6 +13,7 @@ em português brasileiro e espanhol da Espanha.
 
 - [Arquitetura, banco de dados, permissões e plano de fases](docs/ARCHITECTURE.md)
 - [Instalação, credenciais e publicação](docs/SETUP.md)
+- [Segurança, privacidade (RGPD) e aspectos legais](docs/SECURITY.md)
 
 ## Início rápido
 
@@ -29,7 +30,8 @@ npm run dev
 | `npm run dev` | Servidor de desenvolvimento |
 | `npm run build` / `npm start` | Build e execução de produção |
 | `npm test` | Testes unitários (Vitest) |
-| `npm run test:db` | Migrations + testes de RLS, conflitos e cálculos em PostgreSQL local |
+| `npm run test:db` | Migrations + testes de RLS, conflitos, cálculos e auditoria de segurança em PostgreSQL local |
+| `npm run test:e2e` | Build com Supabase simulado + navegação real por todas as telas (Playwright) |
 | `npm run typecheck` / `npm run lint` | Verificação de tipos e lint |
 | `node scripts/generate-icons.mjs` | Regenera os ícones PNG do PWA |
 
@@ -58,5 +60,8 @@ npm run dev
 - **Fase 9 ✅** — calendário (mês, linha do tempo da frota e busca de disponibilidade), notificações
   persistentes com leitura por usuário e área do cliente (acesso por código no e-mail: reservas,
   pagamentos, cauções, contrato em PDF, documentos, multas e solicitação de reserva).
+- **Fase 10 ✅** — relatórios com exportação CSV/PDF, testes E2E, revisão de segurança com verificações
+  automáticas (RLS, guardas, segredos, funções privilegiadas), endurecimento e guia de publicação.
 
-Os módulos das próximas fases aparecem no menu marcados com a fase em que serão liberados.
+Todas as fases do plano estão concluídas. Antes de publicar, siga o checklist em
+[docs/SECURITY.md](docs/SECURITY.md#7-checklist-antes-de-publicar).
