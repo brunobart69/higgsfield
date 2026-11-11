@@ -1,0 +1,658 @@
+"""Agentes 01 a 10 — especialistas."""
+from __future__ import annotations
+
+from .. import indicators as ind
+from ..context import MarketContext
+from ..data.news import IMPACT_PT, IMPACT_RANK
+from ..models import BEAR, BULL, NEUTRAL, DIR_LABEL, TIMEFRAMES, TF_LABEL, AgentReport, fmt_ts
+from .base import Agent
+
+
+def _fmt(x: float) -> str:
+    return f"{x:.5f}" if x < 20 else f"{x:.3f}"
+
+
+def _efficiency(closes: list[float], n: int = 20) -> float:
+    if len(closes) < n + 1:
+        return 0.0
+    seg = closes[-n - 1:]
+    path = sum(abs(b - a) for a, b in zip(seg, seg[1:]))
+    return abs(seg[-1] - seg[0]) / path if path else 0.0
+
+
+# =========================================================================== 01
+class NewsAgent(Agent):
+    code, number, name, group = "NEWS", 1, "News Intelligence", "macro"
+    specialty = "Notícias, calendário econômico, bancos centrais e geopolítica"
+    personality = "Cético e cronológico: só aceita evento com data, horário e fonte."
+    methodology = ("Classifica impacto (alto/médio/baixo), mede surpresa (atual - previsão), verifica se o "
+                   "preço já reagiu (precificação) e bloqueia operações próximas a eventos de alto impacto.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        rep.data["events"] = []
+        store = ctx.news
+        if store is None or not store.loaded:
+            rep.abstain = True
+            rep.summary = "Nenhum calendário econômico carregado: contexto macro NÃO avaliado (não invento notícias)."
+            rep.warnings.append("Carregue data/news/*.json ou use `python -m tio news --fetch`.")
+            return rep
+        cov = store.coverage()
+        if cov and not (cov[0] - 86400 * 2 <= ctx.as_of <= cov[1] + 86400 * 2):
+            rep.abstain = True
+            rep.summary = (f"O calendário carregado cobre {fmt_ts(cov[0])} → {fmt_ts(cov[1])} e não inclui o "
+                           f"instante analisado ({fmt_ts(ctx.as_of)}).")
+            return rep
+        p = ctx.params
+        events = store.for_pair(ctx.asset, ctx.as_of - 8 * 3600, ctx.as_of + 6 * 3600)
+        base, quote = ctx.asset[:3], ctx.asset[3:]
+        atr = ctx.atr() or 0
+        cs = ctx.candles() or []
+        avoid = False
+        for e in events:
+            info = e.to_dict()
+            known = e.ts <= ctx.as_of
+            if not known:  # evento futuro: valores ainda não divulgados
+                info["actual"] = None
+            rep.data["events"].append(info)
+            mins = (e.ts - ctx.as_of) / 60
+            if e.impact == "high" and -p.news_block_after_min <= mins <= p.news_block_before_min:
+                avoid = True
+                rep.warnings.append(f"Evento de ALTO impacto {e.currency} '{e.title}' às {info['time_label']} "
+                                    f"(fonte: {e.source}). Volatilidade elevada — evitar operar.")
+            if not known or e.surprise() is None or e.category_sign == 0:
+                continue
+            sign = (1 if e.surprise() > 0 else -1 if e.surprise() < 0 else 0) * e.category_sign
+            if sign == 0:
+                continue
+            pair_dir = sign if e.currency == base else -sign
+            moved = 0.0
+            after = [c for c in cs if c.ts >= e.ts]
+            if after and atr:
+                moved = (cs[-1].close - after[0].open) / atr
+            priced = moved * pair_dir > 1.5
+            q = (0.35 if priced else 0.8) * (1.0 if e.impact == "high" else 0.6 if e.impact == "medium" else 0.3)
+            age_h = (ctx.as_of - e.ts) / 3600
+            q *= max(0.3, 1 - age_h / 8)
+            self.ev(rep, "news_surprise",
+                    f"{e.title} ({e.currency}, {IMPACT_PT.get(e.impact)}) {info['time_label']}: atual {e.actual} vs "
+                    f"previsão {e.forecast} → favorece {DIR_LABEL[pair_dir]} em {ctx.asset}"
+                    f"{' (provavelmente já precificado)' if priced else ''}. Fonte: {e.source}",
+                    pair_dir, 0.7 if e.impact == "high" else 0.4, q, ctx.focus_tf)
+        rep.data["avoid"] = avoid
+        rep.data["high_volatility"] = avoid or any(IMPACT_RANK.get(x["impact"], 0) == 3 and abs(x["ts"] - ctx.as_of) < 7200
+                                                   for x in rep.data["events"])
+        rep.veto = avoid
+        if avoid:
+            rep.summary = "Evento de alto impacto na janela de bloqueio: recomendo NÃO operar agora."
+        elif not events:
+            rep.summary = "Calendário verificado: nenhum evento relevante para o par na janela (-8h/+6h)."
+        return rep
+
+
+# =========================================================================== 02
+class PriceActionAgent(Agent):
+    code, number, name, group = "PA", 2, "Price Action & Fluxo", "structure"
+    specialty = "Deslocamentos, BOS/CHOCH, Order Blocks, FVG, absorção e rejeição"
+    personality = "Objetivo; só considera estrutura rompida por FECHAMENTO."
+    methodology = ("Mapeia pivôs confirmados, rupturas de estrutura por fechamento, impulsos com corpo > 1,6 ATR, "
+                   "zonas de FVG/OB não mitigadas e mede a eficiência do movimento para separar fluxo de ruído.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        if not cs or len(cs) < 80:
+            rep.abstain = True
+            return rep
+        atr = ctx.atr(tf)
+        st = ctx.structure(tf)
+        n = len(cs)
+        eff = _efficiency([c.close for c in cs], 20)
+        rep.data["efficiency"] = round(eff, 3)
+        noise = eff < 0.18
+        if st.events:
+            e = st.events[-1]
+            age = n - 1 - e.idx
+            q = max(0.25, 1 - age / 60) * (0.6 if noise else 1.0)
+            self.ev(rep, e.kind.lower(), f"{e.kind} de {DIR_LABEL[e.direction]} em {_fmt(e.level)} ({tf}, há {age} candles fechados)",
+                    e.direction, 0.8 if e.kind == "BOS" else 0.7, q, tf)
+            rep.data["structure_events"] = [{"ts": x.ts, "kind": x.kind, "dir": x.direction, "level": x.level} for x in st.events[-6:]]
+        disp = [i for i in ind.displacements(cs, ctx.atr_series(tf)) if i >= n - 8]
+        if disp:
+            i = disp[-1]
+            d = 1 if cs[i].bullish else -1
+            self.ev(rep, "displacement", f"Deslocamento forte de {DIR_LABEL[d]} (corpo {cs[i].body / atr:.1f}× ATR) há {n - 1 - i} candles",
+                    d, 0.5, 0.9 - 0.08 * (n - 1 - i), tf)
+        price = cs[-1].close
+        fvgs = [z for z in ind.fair_value_gaps(cs[-150:], 0.15 * atr) if not z.mitigated]
+        obs = [z for z in ind.order_blocks(cs[-200:], ind.displacements(cs[-200:], ind.atr(cs[-200:]))) if not z.mitigated]
+        rep.data["fvg"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in fvgs[-5:]]
+        rep.data["order_blocks"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in obs[-5:]]
+        for z in (fvgs[-4:] + obs[-4:]):
+            near = (z.low - 0.5 * atr) <= price <= (z.high + 0.5 * atr)
+            if near and ((z.direction == 1 and price >= z.low) or (z.direction == -1 and price <= z.high)):
+                self.ev(rep, z.kind.lower(), f"Preço reagindo em {z.kind} de {DIR_LABEL[z.direction]} não mitigado "
+                                             f"[{_fmt(z.low)}–{_fmt(z.high)}]", z.direction, 0.4, 0.7, tf)
+                break
+        rj = ind.wick_rejection(cs[-1])
+        if rj:
+            self.ev(rep, "rejection", f"Último candle fechado com pavio de rejeição ({'inferior' if rj == 1 else 'superior'})",
+                    rj, 0.3, 0.7, tf)
+        if ctx.data.volume_kind != "none":
+            vavg = sum(c.volume for c in cs[-50:]) / 50
+            last = cs[-1]
+            if vavg and last.volume > 1.8 * vavg and last.body < 0.3 * last.range:
+                rep.warnings.append("Possível absorção: volume alto com corpo pequeno no último candle.")
+        if noise:
+            rep.warnings.append(f"Eficiência direcional baixa ({eff:.2f}): predominância de ruído, não de fluxo.")
+        return rep
+
+
+# =========================================================================== 03
+class RetracementAgent(Agent):
+    code, number, name, group = "RET", 3, "Retração", "fib"
+    specialty = "Retrações saudáveis vs. reversões em H4, H1 e M15"
+    personality = "Paciente: prefere esperar a correção a perseguir o preço."
+    methodology = ("Identifica a última perna impulsiva confirmada, mede a retração (0,382–0,705 = zona saudável), "
+                   "verifica confluência com S/R e invalida a retração acima de 0,786 ou com deslocamento contrário.")
+
+    def leg(self, ctx: MarketContext, tf: str):
+        sw = ctx.swings(tf)
+        st = ctx.structure(tf)
+        if st.trend == 0 or len(sw) < 4:
+            return None
+        highs = [s for s in sw if s.kind == "H"]
+        lows = [s for s in sw if s.kind == "L"]
+        if not highs or not lows:
+            return None
+        if st.trend == 1:
+            hi = highs[-1]
+            prior = [l for l in lows if l.idx < hi.idx]
+            return (prior[-1], hi, 1) if prior else None
+        lo = lows[-1]
+        prior = [h for h in highs if h.idx < lo.idx]
+        return (prior[-1], lo, -1) if prior else None
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        price = ctx.price
+        tfs = [t for t in ("H4", "H1", ctx.focus_tf) if ctx.enough(t, 60)]
+        tfs = list(dict.fromkeys(tfs))
+        if not tfs:
+            rep.abstain = True
+            return rep
+        rep.data["legs"] = {}
+        for tf in tfs:
+            lg = self.leg(ctx, tf)
+            if not lg:
+                continue
+            a, b, d = lg
+            rng = abs(b.price - a.price)
+            atr = ctx.atr(tf) or 0
+            if rng < 2 * atr or rng == 0:
+                continue
+            r = (b.price - price) / rng if d == 1 else (price - b.price) / rng
+            rep.data["legs"][tf] = {"from": a.price, "to": b.price, "dir": d, "retr": round(r, 3)}
+            w = {"H4": 0.75, "H1": 0.65}.get(tf, 0.55)
+            cs = ctx.candles(tf)
+            since = cs[b.idx + 1:] if b.idx + 1 < len(cs) else []
+            counter_disp = any(c.body > 1.8 * atr and ((c.close < c.open) if d == 1 else (c.close > c.open)) for c in since)
+            if 0.382 <= r <= 0.705:
+                zones = ctx.zones(tf)
+                conf = any(z.low - 0.3 * atr <= price <= z.high + 0.3 * atr and z.touches >= 2 for z in zones)
+                q = 0.55 + (0.25 if conf else 0) - (0.3 if counter_disp else 0)
+                self.ev(rep, "healthy_retracement",
+                        f"Retração saudável de {r:.0%} da perna de {DIR_LABEL[d]} em {tf}"
+                        f"{' com confluência de S/R' if conf else ''}{' (atenção: deslocamento contrário)' if counter_disp else ''}",
+                        d, w, q, tf)
+            elif 0.705 < r <= 0.886:
+                self.ev(rep, "deep_retracement", f"Retração profunda ({r:.0%}) em {tf}: continuação ainda possível, mas frágil",
+                        d, w * 0.6, 0.35, tf)
+            elif r > 0.886:
+                self.ev(rep, "retracement_invalid", f"Retração de {r:.0%} em {tf} perdeu validade: possível reversão",
+                        -d, w * 0.5, 0.5, tf)
+            elif r < 0.236:
+                rep.warnings.append(f"{tf}: preço perto do extremo da perna — sem retração para entrada de continuação.")
+        return rep
+
+
+# =========================================================================== 04
+class ReversalAgent(Agent):
+    code, number, name, group = "REV", 4, "Reversão", "reversal"
+    specialty = "Exaustão, divergências, rejeições, CHOCH e falsas rupturas"
+    personality = "Contrarian disciplinado: exige pelo menos dois sinais independentes."
+    methodology = ("Coleta sinais de exaustão (RSI extremo, divergência, pavio de rejeição em zona, CHOCH recente, "
+                   "varredura de liquidez, extensão > 3 ATR da EMA50). Nunca recomenda reversão com um sinal só.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        if not cs or len(cs) < 80:
+            rep.abstain = True
+            return rep
+        p = ctx.params
+        atr = ctx.atr(tf)
+        r = ctx.rsi(tf)
+        signals = {BULL: [], BEAR: []}
+        if r[-1] is not None:
+            if r[-1] >= p.rsi_overbought - 5:
+                signals[BEAR].append(f"RSI esticado ({r[-1]:.1f})")
+            if r[-1] <= p.rsi_oversold + 5:
+                signals[BULL].append(f"RSI esticado ({r[-1]:.1f})")
+        div = ind.rsi_divergence(cs, r, ctx.swings(tf))
+        if div:
+            signals[div[0]].append(f"divergência: {div[1]}")
+        rj = ind.wick_rejection(cs[-1])
+        if rj:
+            near_zone = any(z.low - 0.3 * atr <= cs[-1].close <= z.high + 0.3 * atr for z in ctx.zones(tf) if z.touches >= 2)
+            if near_zone:
+                signals[rj].append("pavio de rejeição em zona testada")
+        st = ctx.structure(tf)
+        if st.events and st.events[-1].kind == "CHOCH" and len(cs) - 1 - st.events[-1].idx <= 12:
+            signals[st.events[-1].direction].append("CHOCH recente (mudança de caráter)")
+        for s in ind.detect_sweeps(cs, ctx.pools(tf), 4):
+            signals[s.direction].append(f"falsa ruptura/varredura em {_fmt(s.level)}")
+            break
+        e50 = ctx.ema(tf, 50)
+        ext = (cs[-1].close - e50[-1]) / atr if atr else 0
+        if ext > 3:
+            signals[BEAR].append(f"extensão de {ext:.1f} ATR acima da EMA50")
+        elif ext < -3:
+            signals[BULL].append(f"extensão de {-ext:.1f} ATR abaixo da EMA50")
+        rep.data["signals"] = {DIR_LABEL[k]: v for k, v in signals.items()}
+        for d, sig in signals.items():
+            sig = list(dict.fromkeys(sig))
+            if len(sig) >= 2:
+                self.ev(rep, "reversal_setup", f"Possível reversão para {DIR_LABEL[d]}: " + "; ".join(sig),
+                        d, 0.7, min(1.0, 0.35 + 0.2 * len(sig)), tf)
+            elif len(sig) == 1:
+                rep.warnings.append(f"Apenas um sinal de reversão para {DIR_LABEL[d]} ({sig[0]}) — insuficiente.")
+        if not rep.evidence:
+            rep.summary = "Sem confirmação estrutural de reversão."
+        return rep
+
+
+# =========================================================================== 05
+class VolumeRSIAgent(Agent):
+    code, number, name, group = "VOL", 5, "Volume & RSI", "momentum"
+    specialty = "Força do movimento: volume, RSI, sobrecompra/sobrevenda e divergências"
+    personality = "Desconfiado de extremos: RSI só vale com confirmação de preço e volume."
+    methodology = ("RSI(14) de Wilder com 80/20/50. Extremos exigem candle de confirmação; volume comparado à "
+                   "média de 50 candles. Sem volume real (forex à vista), declara a limitação.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        if not cs or len(cs) < 60:
+            rep.abstain = True
+            return rep
+        p = ctx.params
+        r = ctx.rsi(tf)
+        cur = r[-1]
+        prev = r[-4] if r[-4] is not None else cur
+        rep.data["rsi"] = round(cur, 2) if cur is not None else None
+        rep.data["rsi_series"] = [round(x, 2) if x is not None else None for x in r[-120:]]
+        last = cs[-1]
+        if cur is not None:
+            if cur >= p.rsi_overbought:
+                if last.bearish or ind.wick_rejection(last) == -1:
+                    self.ev(rep, "rsi_overbought_confirmed", f"RSI {cur:.1f} em sobrecompra extrema com candle de rejeição fechado",
+                            BEAR, 0.5, 0.7, tf)
+                else:
+                    rep.warnings.append(f"RSI {cur:.1f} em sobrecompra extrema SEM confirmação de preço — não é sinal isolado.")
+            elif cur <= p.rsi_oversold:
+                if last.bullish or ind.wick_rejection(last) == 1:
+                    self.ev(rep, "rsi_oversold_confirmed", f"RSI {cur:.1f} em sobrevenda extrema com candle de rejeição fechado",
+                            BULL, 0.5, 0.7, tf)
+                else:
+                    rep.warnings.append(f"RSI {cur:.1f} em sobrevenda extrema SEM confirmação de preço — não é sinal isolado.")
+            elif cur > p.rsi_mid + 5 and cur > prev:
+                self.ev(rep, "rsi_momentum", f"RSI {cur:.1f} acima do equilíbrio (50) e subindo", BULL, 0.35, 0.6, tf)
+            elif cur < p.rsi_mid - 5 and cur < prev:
+                self.ev(rep, "rsi_momentum", f"RSI {cur:.1f} abaixo do equilíbrio (50) e caindo", BEAR, 0.35, 0.6, tf)
+        div = ind.rsi_divergence(cs, r, ctx.swings(tf))
+        if div:
+            self.ev(rep, "rsi_divergence", f"Divergência RSI: {div[1]}", div[0], 0.45, 0.6, tf)
+        vk = ctx.data.volume_kind
+        rep.data["volume_kind"] = vk
+        if vk == "none":
+            rep.warnings.append("Volume indisponível nesta fonte (forex à vista não possui volume centralizado). "
+                                "Força avaliada apenas pelo RSI.")
+            return rep
+        vols = [c.volume for c in cs]
+        avg = sum(vols[-50:]) / 50
+        recent = sum(vols[-5:]) / 5
+        move = cs[-1].close - cs[-6].close
+        d = 1 if move > 0 else -1 if move < 0 else 0
+        ratio = recent / avg if avg else 1
+        rep.data["volume_ratio"] = round(ratio, 2)
+        label = "tick volume" if vk == "tick" else "volume"
+        if ratio > 1.25 and d:
+            self.ev(rep, "volume_confirm", f"{label} {ratio:.2f}× a média acompanhando movimento de {DIR_LABEL[d]}",
+                    d, 0.5, min(1.0, 0.4 + (ratio - 1) * 0.5), tf, group="volume")
+        elif ratio < 0.75 and d:
+            self.ev(rep, "volume_fading", f"Movimento de {DIR_LABEL[d]} com {label} fraco ({ratio:.2f}× a média): possível exaustão",
+                    -d, 0.25, 0.45, tf, group="volume")
+        return rep
+
+
+# =========================================================================== 06
+class VolumeProfileAgent(Agent):
+    code, number, name, group = "VP", 6, "Volume Profile & POC", "profile"
+    specialty = "Distribuição de volume por preço: POC, VAH, VAL, HVN/LVN"
+    personality = "Pensa em aceitação e rejeição de preço, não em direção pura."
+    methodology = ("Perfil dos últimos 200 candles (70% de área de valor). Aceitação fora da área de valor "
+                   "(3 fechamentos) indica busca de novo valor; dentro dela, rotação para o POC.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        vp = ctx.profile(tf)
+        if not cs or vp is None or len(cs) < 60:
+            rep.abstain = True
+            return rep
+        price = cs[-1].close
+        atr = ctx.atr(tf)
+        rep.data.update({"poc": vp.poc, "vah": vp.vah, "val": vp.val, "mode": vp.mode,
+                         "bins": [[round(p, 6), round(v, 2)] for p, v in vp.bins], "hvn": vp.hvn[:6], "lvn": vp.lvn[:6]})
+        q_mode = 1.0 if vp.mode == "volume" else 0.6
+        if vp.mode == "tpo":
+            rep.warnings.append("Sem volume na fonte: perfil construído por tempo no preço (TPO), não por volume.")
+        last3 = [c.close for c in cs[-3:]]
+        if all(c > vp.vah for c in last3):
+            self.ev(rep, "acceptance_above", f"Aceitação acima da VAH ({_fmt(vp.vah)}): 3 fechamentos fora do valor",
+                    BULL, 0.55, 0.75 * q_mode, tf)
+        elif all(c < vp.val for c in last3):
+            self.ev(rep, "acceptance_below", f"Aceitação abaixo da VAL ({_fmt(vp.val)}): 3 fechamentos fora do valor",
+                    BEAR, 0.55, 0.75 * q_mode, tf)
+        elif cs[-1].high > vp.vah and price < vp.vah:
+            self.ev(rep, "rejection_vah", f"Rejeição na VAH ({_fmt(vp.vah)}): retorno para a área de valor", BEAR, 0.45, 0.65 * q_mode, tf)
+        elif cs[-1].low < vp.val and price > vp.val:
+            self.ev(rep, "rejection_val", f"Rejeição na VAL ({_fmt(vp.val)}): retorno para a área de valor", BULL, 0.45, 0.65 * q_mode, tf)
+        elif vp.val <= price <= vp.vah:
+            dist = (price - vp.poc) / atr if atr else 0
+            if abs(dist) > 1.0:
+                d = BEAR if dist > 0 else BULL
+                self.ev(rep, "poc_magnet", f"Dentro do valor, {abs(dist):.1f} ATR {'acima' if dist > 0 else 'abaixo'} do POC "
+                                           f"({_fmt(vp.poc)}): rotação provável em direção ao POC", d, 0.3, 0.5 * q_mode, tf)
+            else:
+                rep.warnings.append(f"Preço no POC ({_fmt(vp.poc)}): região de equilíbrio, sem vantagem direcional.")
+        rep.data["price_vs_poc"] = "acima" if price > vp.poc else "abaixo"
+        return rep
+
+
+# =========================================================================== 07
+class SupportResistanceAgent(Agent):
+    code, number, name, group = "SR", 7, "Suporte & Resistência", "zones"
+    specialty = "Zonas de reação, consolidações e rompimentos falsos em H1 e H4"
+    personality = "Cartógrafo: prioriza zonas confirmadas por fechamento e desconfia de zonas gastas."
+    methodology = ("Agrupa pivôs em zonas (tolerância 0,35 ATR), conta toques, reações e rompimentos por "
+                   "fechamento. Zona com 4+ testes é considerada desgastada.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        price = ctx.price
+        found = False
+        rep.data["zones"] = []
+        for tf in ("H4", "H1"):
+            if not ctx.enough(tf, 60):
+                continue
+            found = True
+            atr = ctx.atr(tf)
+            cs = ctx.candles(tf)
+            zones = [z for z in ctx.zones(tf) if z.touches >= 2]
+            for z in zones:
+                role = "suporte" if z.high < price else ("resistência" if z.low > price else "em teste")
+                if abs(z.mid - price) <= 4 * atr:
+                    rep.data["zones"].append({"tf": tf, "low": z.low, "high": z.high, "touches": z.touches,
+                                              "reactions": z.closes_respected, "breaks": z.breaks, "role": role})
+            w = 0.65 if tf == "H4" else 0.55
+            sup = max((z for z in zones if z.mid < price + 0.1 * atr), key=lambda z: z.mid, default=None)
+            res = min((z for z in zones if z.mid > price - 0.1 * atr), key=lambda z: z.mid, default=None)
+            last = cs[-1]
+            for z, d, nm in ((sup, BULL, "suporte"), (res, BEAR, "resistência")):
+                if z is None:
+                    continue
+                dist = (price - z.high) / atr if d == BULL else (z.low - price) / atr
+                if dist <= 0.4:
+                    worn = z.touches >= 4
+                    held = (last.close > z.low) if d == BULL else (last.close < z.high)
+                    if not held:
+                        continue
+                    q = 0.5 + 0.1 * min(z.closes_respected, 3) - (0.25 if worn else 0) - 0.1 * z.breaks
+                    self.ev(rep, f"at_{'support' if d == BULL else 'resistance'}",
+                            f"Preço em {nm} {tf} [{_fmt(z.low)}–{_fmt(z.high)}], {z.touches} toques, {z.closes_respected} reações"
+                            f"{' — zona desgastada' if worn else ''}", d, w, q, tf)
+                # falso rompimento: pavio além da zona e fechamento de volta
+                if d == BULL and last.low < z.low and last.close > z.low:
+                    self.ev(rep, "false_break", f"Rompimento falso do {nm} {tf} em {_fmt(z.low)} (fechou de volta)", BULL, 0.5, 0.65, tf)
+                if d == BEAR and last.high > z.high and last.close < z.high:
+                    self.ev(rep, "false_break", f"Rompimento falso da {nm} {tf} em {_fmt(z.high)} (fechou de volta)", BEAR, 0.5, 0.65, tf)
+            # rompimento confirmado por fechamento
+            prev = cs[-2]
+            for z in zones:
+                if prev.close <= z.high < last.close and last.body > 0.5 * atr:
+                    self.ev(rep, "breakout", f"Rompimento de resistência {tf} {_fmt(z.high)} confirmado por fechamento", BULL, 0.5, 0.6, tf)
+                elif prev.close >= z.low > last.close and last.body > 0.5 * atr:
+                    self.ev(rep, "breakdown", f"Rompimento de suporte {tf} {_fmt(z.low)} confirmado por fechamento", BEAR, 0.5, 0.6, tf)
+        if not found:
+            rep.abstain = True
+        hi20 = max(c.high for c in (ctx.candles("H1") or ctx.candles())[-20:])
+        lo20 = min(c.low for c in (ctx.candles("H1") or ctx.candles())[-20:])
+        atr1 = ctx.atr("H1") or ctx.atr()
+        if atr1 and hi20 - lo20 < 2.5 * atr1:
+            rep.warnings.append(f"Consolidação: últimos 20 candles H1 em faixa estreita ({_fmt(lo20)}–{_fmt(hi20)}).")
+            rep.data["consolidation"] = [lo20, hi20]
+        return rep
+
+
+# =========================================================================== 08
+class FibonacciAgent(Agent):
+    code, number, name, group = "FIB", 8, "Fibonacci Intelligence", "fib"
+    specialty = "Retrações e expansões em 4 categorias: Diamante, Ouro, Prata, Bronze"
+    personality = "Geômetra: só valoriza níveis que coincidem entre temporalidades."
+    methodology = ("DIAMANTE = último ano fechado; OURO = último mês fechado; PRATA = última semana fechada; "
+                   "BRONZE = última perna confirmada em H4. Níveis só mudam após o fechamento do candle de referência.")
+
+    CATS = [("DIAMANTE", "Y1"), ("OURO", "MN"), ("PRATA", "W1"), ("BRONZE", "H4")]
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        price = ctx.price
+        atr = ctx.atr("H1") or ctx.atr()
+        if not atr:
+            rep.abstain = True
+            return rep
+        cats = {}
+        for name, tf in self.CATS:
+            cs = ctx.candles(tf)
+            if tf == "H4":
+                lg = RetracementAgent().leg(ctx, "H4") if ctx.enough("H4", 60) else None
+                if not lg:
+                    cats[name] = None
+                    continue
+                a, b, d = lg
+                lo, hi = (a.price, b.price) if d == 1 else (b.price, a.price)
+                ref = f"perna H4 {fmt_ts(a.ts)} → {fmt_ts(b.ts)}"
+            else:
+                if not cs:
+                    cats[name] = None
+                    continue
+                c = cs[-1]  # último candle FECHADO da referência
+                lo, hi, d = c.low, c.high, (1 if c.close >= c.open else -1)
+                ref = f"candle {TF_LABEL[tf]} fechado em {fmt_ts(c.close_ts)}"
+            cats[name] = {"tf": tf, "low": lo, "high": hi, "dir": d, "ref": ref,
+                          "levels": ind.fib_levels(lo, hi, d)}
+        rep.data["categories"] = cats
+        missing = [k for k, v in cats.items() if v is None]
+        if missing:
+            rep.warnings.append(f"Categorias sem dados suficientes: {', '.join(missing)}.")
+        if all(v is None for v in cats.values()):
+            rep.abstain = True
+            return rep
+        tol = 0.35 * atr
+        near = []
+        for name, c in cats.items():
+            if not c:
+                continue
+            for lvl, val in c["levels"].items():
+                if not lvl.startswith("ext") and abs(val - price) <= tol:
+                    near.append((name, lvl, val, c["dir"]))
+        rep.data["near_levels"] = [{"cat": n, "level": l, "price": v} for n, l, v, _ in near]
+        if near:
+            cats_hit = sorted({n for n, *_ in near})
+            dirs = [d for *_, d in near]
+            d = BULL if sum(dirs) > 0 else BEAR if sum(dirs) < 0 else NEUTRAL
+            golden = any(l in ("0.618", "0.705", "0.500") for _, l, _, _ in near)
+            q = min(1.0, 0.35 + 0.2 * len(cats_hit) + (0.15 if golden else 0))
+            w = {"DIAMANTE": 0.8, "OURO": 0.7, "PRATA": 0.6, "BRONZE": 0.5}[max(cats_hit, key=lambda n: ["BRONZE", "PRATA", "OURO", "DIAMANTE"].index(n))]
+            txt = ", ".join(f"{n} {l}" for n, l, _, _ in near[:4])
+            if d != NEUTRAL:
+                self.ev(rep, "fib_confluence", f"Preço em nível(is) de Fibonacci: {txt}"
+                                               f"{' — sobreposição entre categorias' if len(cats_hit) > 1 else ''}", d, w, q, "H1")
+            else:
+                rep.warnings.append(f"Níveis de Fibonacci com sinais opostos: {txt}")
+        tgt = []
+        for name, c in cats.items():
+            if c:
+                for lvl, val in c["levels"].items():
+                    if lvl.startswith("ext"):
+                        tgt.append({"cat": name, "level": lvl, "price": val, "dist_atr": round((val - price) / atr, 1)})
+        rep.data["targets"] = sorted(tgt, key=lambda t: abs(t["dist_atr"]))[:6]
+        return rep
+
+
+# =========================================================================== 09
+class MultiTimeframeAgent(Agent):
+    code, number, name, group = "MTF", 9, "Multi-Timeframe Trend", "trend"
+    specialty = "Tendência principal/secundária e alinhamento de Anual a M1"
+    personality = "Hierárquico: a temporalidade maior manda até prova em contrário."
+    methodology = ("Por temporalidade: estrutura (topos/fundos) + inclinação EMA20/EMA50. Principal = D1/H4, "
+                   "secundária = H1/M15. Alinhamento exige concordância das três temporalidades operacionais.")
+
+    def tf_trend(self, ctx: MarketContext, tf: str) -> dict:
+        cs = ctx.candles(tf)
+        need = 3 if tf == "Y1" else 12 if tf in ("MN", "W1") else 60
+        if not cs or len(cs) < need:
+            return {"tf": tf, "trend": None, "label": "sem dados"}
+        if len(cs) < 60:
+            d = 1 if cs[-1].close > cs[0].open else -1
+            return {"tf": tf, "trend": d, "label": DIR_LABEL[d], "strength": 0.4, "note": "poucos candles"}
+        st = ctx.structure(tf)
+        e20, e50 = ctx.ema(tf, 20), ctx.ema(tf, 50)
+        atr = ctx.atr(tf) or 1e-9
+        sl = ind.slope(e20, 10) / atr
+        ema_dir = 1 if e20[-1] > e50[-1] and sl > 0.02 else -1 if e20[-1] < e50[-1] and sl < -0.02 else 0
+        eff = _efficiency([c.close for c in cs], 30)
+        if st.trend == ema_dir and st.trend != 0:
+            trend, s = st.trend, 0.8
+        elif st.trend != 0 and ema_dir == 0:
+            trend, s = st.trend, 0.5
+        elif ema_dir != 0 and st.trend == 0:
+            trend, s = ema_dir, 0.45
+        else:
+            trend, s = 0, 0.0
+        consolidation = eff < 0.12 and abs(sl) < 0.03
+        if consolidation:
+            trend, s = 0, 0.0
+        recent_choch = bool(st.events and st.events[-1].kind == "CHOCH" and len(cs) - 1 - st.events[-1].idx <= 15)
+        label = "CONSOLIDAÇÃO" if consolidation else DIR_LABEL[trend] if trend else "INDEFINIDA"
+        return {"tf": tf, "trend": trend, "label": label, "strength": round(s, 2), "choch": recent_choch,
+                "slope": round(sl, 3)}
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tmap = {tf: self.tf_trend(ctx, tf) for tf in TIMEFRAMES}
+        rep.data["map"] = tmap
+        oper = [tf for tf in ("H4", "H1", ctx.focus_tf) if tmap.get(tf, {}).get("trend") is not None]
+        oper = list(dict.fromkeys(oper))
+        if len(oper) < 2:
+            rep.abstain = True
+            return rep
+        primary = next((tmap[t] for t in ("D1", "H4") if tmap[t].get("trend")), None)
+        secondary = next((tmap[t] for t in ("H1", "M15") if tmap[t].get("trend")), None)
+        rep.data["primary"] = primary
+        rep.data["secondary"] = secondary
+        dirs = [tmap[t]["trend"] for t in oper]
+        if all(d == dirs[0] for d in dirs) and dirs[0] != 0:
+            q = sum(tmap[t]["strength"] for t in oper) / len(oper)
+            hi = [t for t in ("W1", "D1") if tmap[t].get("trend") == dirs[0]]
+            self.ev(rep, "aligned", f"Temporalidades alinhadas em {DIR_LABEL[dirs[0]]}: {', '.join(oper)}"
+                                    f"{' (+' + ', '.join(hi) + ')' if hi else ''}", dirs[0], 0.85, min(1.0, q + 0.1 * len(hi)), "H4")
+        else:
+            h4 = tmap.get("H4", {}).get("trend")
+            if h4:
+                self.ev(rep, "htf_trend", f"Tendência principal H4 de {DIR_LABEL[h4]}, mas sem alinhamento nas menores",
+                        h4, 0.5, tmap["H4"]["strength"] * 0.7, "H4")
+            counter = [t for t in oper if tmap[t]["trend"] and h4 and tmap[t]["trend"] == -h4]
+            if counter:
+                rep.warnings.append(f"Movimento contrário em {', '.join(counter)} frente à tendência H4.")
+        for t in ("H4", "H1"):
+            if tmap.get(t, {}).get("choch"):
+                rep.warnings.append(f"Possível mudança de tendência: CHOCH recente em {t}.")
+        return rep
+
+
+# =========================================================================== 10
+class LiquidityHunterAgent(Agent):
+    code, number, name, group = "LIQ", 10, "Liquidity Hunter", "liquidity"
+    specialty = "Liquidez acima de topos/abaixo de fundos, equal highs/lows, varreduras e armadilhas"
+    personality = "Investigativo e prudente: descreve comportamento compatível com busca de liquidez, sem acusar manipulação."
+    methodology = ("Mapeia pools (equal highs/lows, máximas/mínimas anteriores, PDH/PDL), separa liquidez interna e "
+                   "externa e identifica varreduras: pavio além do nível com fechamento de volta.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        if not cs or len(cs) < 80:
+            rep.abstain = True
+            return rep
+        price = cs[-1].close
+        atr = ctx.atr(tf)
+        pools = ctx.pools(tf)
+        live = [p for p in pools if not p.swept]
+        above = sorted([p for p in live if p.price > price], key=lambda p: p.price)[:5]
+        below = sorted([p for p in live if p.price < price], key=lambda p: -p.price)[:5]
+        d1 = ctx.candles("D1")
+        extra = []
+        if d1:
+            pd = d1[-1]
+            extra = [{"price": pd.high, "side": "acima", "kind": "PDH (máxima do dia anterior)"},
+                     {"price": pd.low, "side": "abaixo", "kind": "PDL (mínima do dia anterior)"}]
+        kind_pt = {"equal_highs": "Equal Highs", "equal_lows": "Equal Lows", "swing": "topo/fundo anterior"}
+        rep.data["pools"] = [{"price": p.price, "side": p.side, "kind": kind_pt.get(p.kind, p.kind), "count": p.count,
+                              "external": p.external, "dist_atr": round((p.price - price) / atr, 2)} for p in above + below] + extra
+        rep.data["swept"] = [{"price": p.price, "side": p.side, "ts": p.swept_ts} for p in pools if p.swept][-6:]
+        sweeps = ind.detect_sweeps(cs, pools, 4)
+        if sweeps:
+            s = sweeps[-1]
+            age = len(cs) - 1 - s.idx
+            self.ev(rep, "sweep", f"Varredura de liquidez {'abaixo' if s.direction == 1 else 'acima'} de {_fmt(s.level)} "
+                                  f"com fechamento de volta (há {age} candles). Comportamento compatível com busca de liquidez; "
+                                  f"não há evidência suficiente para afirmar manipulação.", s.direction, 0.75, 0.85 - 0.1 * age, tf)
+        # alvo de liquidez (draw on liquidity): pool mais forte e próximo
+        def score(p):
+            return (p.count + (1 if p.external else 0)) / (1 + abs(p.price - price) / atr)
+        cand = above[:3] + below[:3]
+        if cand:
+            best = max(cand, key=score)
+            d = BULL if best.price > price else BEAR
+            dist = abs(best.price - price) / atr
+            if best.count >= 2 and dist <= 3:
+                self.ev(rep, "draw_on_liquidity", f"{kind_pt.get(best.kind)} ({best.count}×) em {_fmt(best.price)}, "
+                                                  f"{dist:.1f} ATR {'acima' if d == BULL else 'abaixo'}: possível alvo de liquidez",
+                        d, 0.35, 0.55, tf)
+        if above and below:
+            ia, ib = abs(above[0].price - price) / atr, abs(price - below[0].price) / atr
+            if ia < 0.5 and ib < 0.5:
+                rep.warnings.append("Liquidez muito próxima dos dois lados: risco de armadilha em ambas as direções.")
+        return rep
+
+
+SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent]

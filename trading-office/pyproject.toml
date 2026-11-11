@@ -1,0 +1,18 @@
+[project]
+name = "trading-intelligence-office"
+version = "1.0.0"
+description = "Escritório virtual de IA para análise de mercado (educacional, sem execução real)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+tio = "tio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tio*"]
+
+[tool.setuptools.package-data]
+tio = ["web/*"]

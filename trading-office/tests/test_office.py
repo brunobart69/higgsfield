@@ -1,0 +1,135 @@
+import json
+
+import pytest
+
+from tio import binary
+from tio.agents import RiskManager
+from tio.backtest import BTConfig, improvement_cycle, run
+from tio.context import MarketData
+from tio.data.news import NewsStore
+from tio.data.providers import CSVProvider, SyntheticProvider, resample, save_csv
+from tio.meeting import Office
+from tio.memory import Memory
+from tio.models import DECISIONS, Series
+from tio.params import ModelParams
+
+END = 1_762_900_000  # instante fixo para reprodutibilidade
+
+
+@pytest.fixture(scope="module")
+def data():
+    return MarketData.load(SyntheticProvider(bars=3000, end=END), "EURUSD", "M15")
+
+
+def strip(res):
+    res = json.loads(json.dumps(res, default=str))
+    for r in res["reports"]:
+        r.pop("calibrated", None)
+    res.pop("confluence")["calibration"]
+    return res
+
+
+def test_no_lookahead(data):
+    """A análise em t deve ser idêntica com ou sem candles posteriores a t."""
+    i = 2000
+    as_of = data.base[i].close_ts
+    truncated = MarketData("EURUSD", Series("EURUSD", "M15", data.base[: i + 1], data.source, True, "tick"))
+    p = ModelParams()
+    a = Office().meet(data.context(as_of, None, Memory(":memory:"), p))
+    b = Office().meet(truncated.context(as_of, None, Memory(":memory:"), p))
+    assert strip(a) == strip(b)
+
+
+def test_higher_tf_only_closed(data):
+    as_of = data.base[1500].close_ts
+    for tf in ("H1", "H4", "D1", "W1"):
+        cs = data.closed(tf, as_of)
+        assert all(c.close_ts <= as_of for c in cs)
+
+
+def test_resample_drops_open_candle(data):
+    as_of = data.base[1001].close_ts  # meio de um candle H4
+    h4 = resample(data.base[:1002], "H4", as_of)
+    assert h4[-1].close_ts <= as_of
+
+
+def test_decision_is_valid(data):
+    res = Office().meet(data.context(None, None, Memory(":memory:"), ModelParams()))
+    assert res["decision"] in DECISIONS
+    assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
+    assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
+    assert len(res["reports"]) == 10
+    assert res["transcript"][-1]["kind"] == "decision"
+
+
+def test_news_agent_abstains_without_calendar(data, tmp_path):
+    res = Office().meet(data.context(None, NewsStore(tmp_path), None, ModelParams()))
+    news = next(r for r in res["reports"] if r["agent"] == "NEWS")
+    assert news["abstain"] and "não invento" in news["summary"]
+
+
+def test_news_without_source_is_discarded(tmp_path):
+    (tmp_path / "x.json").write_text(json.dumps([
+        {"datetime": "2026-01-01T13:30:00Z", "currency": "USD", "impact": "high", "title": "CPI"},
+        {"datetime": "2026-01-01T13:30:00Z", "currency": "USD", "impact": "high", "title": "CPI", "source": "BLS"}]))
+    st = NewsStore(tmp_path)
+    assert len(st.events) == 1 and st.events[0].source == "BLS"
+
+
+def test_high_impact_news_blocks(data, tmp_path):
+    as_of = data.base[-1].close_ts
+    import datetime as dt
+    when = dt.datetime.fromtimestamp(as_of + 600, dt.timezone.utc).isoformat()
+    (tmp_path / "n.json").write_text(json.dumps([{"datetime": when, "currency": "USD", "impact": "high",
+                                                  "title": "Non-Farm Payrolls", "source": "teste"}]))
+    res = Office().meet(data.context(as_of, NewsStore(tmp_path), None, ModelParams()))
+    assert res["news_avoid"] and not res["decision"].startswith("CENÁRIO")
+
+
+def test_settle_binary():
+    from tio.models import Candle
+    base = [Candle(t * 900, 1.0 + t * 0.001, 1.01 + t * 0.001, 0.99 + t * 0.001, 1.0005 + t * 0.001, 0, (t + 1) * 900) for t in range(10)]
+    o = [c.ts for c in base]
+    c = [x.close_ts for x in base]
+    win = binary.settle(base, o, c, 1, 900, 900 * 4, 0.8)
+    assert win["result"] == "WIN" and win["pnl"] == pytest.approx(0.8)
+    loss = binary.settle(base, o, c, -1, 900, 900 * 4, 0.8)
+    assert loss["result"] == "LOSS" and loss["pnl"] == -1
+    assert binary.settle(base, o, c, 1, 900, 900 * 40, 0.8) is None  # sem dados até a expiração
+
+
+def test_real_money_forbidden():
+    assert binary.REAL_MONEY_ENABLED is False
+    with pytest.raises(PermissionError):
+        binary.execute_real_order()
+
+
+def test_risk_rejects_martingale(data):
+    ctx = data.context(None, None, Memory(":memory:"), ModelParams())
+    draft = {"confluence": {"classification": "ALTA", "score": 80}, "news_avoid": False}
+    assert RiskManager().review(ctx, draft, "comite", stake_multiplier=2.0)["approved"] is False
+
+
+def test_backtest_and_memory_isolation(data):
+    m = run({"EURUSD": data}, BTConfig(assets=["EURUSD"], step=12, warmup=450), ModelParams())
+    assert m["steps"] > 50 and m["synthetic"]
+    assert sum(m["decisions"].values()) == m["steps"]
+    for k in ("win_rate", "expectancy", "max_drawdown", "by_hour", "by_asset", "agents"):
+        assert k in m
+    main = Memory(":memory:")
+    assert main.lessons(mode=None) == []  # backtest não escreve no banco principal
+
+
+def test_improvement_cycle_requires_oos(data):
+    mem = Memory(":memory:")
+    rep = improvement_cycle({"EURUSD": data}, mem, step=24, min_trades=10_000, max_candidates=2)
+    assert rep["promoted"] is None
+    assert all(c["status"] == "rejected" for c in rep["candidates"])
+    assert mem.active_version()[0] == "v1.0"
+
+
+def test_csv_roundtrip(tmp_path, data):
+    s = Series("EURUSD", "M15", data.base[:100], "teste", False, "none")
+    save_csv(s, tmp_path)
+    back = CSVProvider(tmp_path).load("EURUSD", "M15")
+    assert len(back) == 100 and back.source == "teste" and back.candles[5].close == pytest.approx(s.candles[5].close)

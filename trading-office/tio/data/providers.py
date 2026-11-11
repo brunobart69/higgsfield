@@ -1,0 +1,275 @@
+"""Fontes de dados de mercado.
+
+Regra nº 1 do escritório: nunca inventar dados de mercado. Toda série carrega
+`source` (origem declarada). O gerador SINTÉTICO existe apenas para testes e
+demonstração da interface e é marcado com `synthetic=True` em toda a cadeia
+(API, dashboard, banco de dados).
+"""
+from __future__ import annotations
+
+import csv
+import datetime as dt
+import json
+import math
+import os
+import random
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Optional
+
+from ..models import ASSETS, TF_SECONDS, Candle, Series, bucket_end, bucket_start
+
+DATA_DIR = Path(os.environ.get("TIO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
+
+
+def _parse_ts(v: str) -> int:
+    v = v.strip()
+    if v.replace(".", "", 1).isdigit():
+        x = float(v)
+        return int(x / 1000) if x > 1e11 else int(x)
+    v = v.replace("Z", "+00:00").replace(" ", "T", 1) if "T" not in v else v.replace("Z", "+00:00")
+    d = dt.datetime.fromisoformat(v)
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return int(d.timestamp())
+
+
+def finalize(candles: list[Candle], tf: str) -> list[Candle]:
+    candles.sort(key=lambda c: c.ts)
+    out: list[Candle] = []
+    for c in candles:
+        if out and out[-1].ts == c.ts:
+            continue
+        c.close_ts = bucket_end(c.ts, tf)
+        out.append(c)
+    return out
+
+
+def closed_only(candles: list[Candle], now: Optional[int] = None) -> list[Candle]:
+    """Remove o candle em formação (regra 4: não usar candle aberto como confirmação)."""
+    now = int(dt.datetime.now(dt.timezone.utc).timestamp()) if now is None else now
+    return [c for c in candles if c.close_ts <= now]
+
+
+def resample(candles: list[Candle], tf: str, as_of: Optional[int] = None) -> list[Candle]:
+    """Agrega candles para `tf`. Mantém só candles cujo fechamento <= as_of."""
+    out: list[Candle] = []
+    cur: Optional[Candle] = None
+    for c in candles:
+        b = bucket_start(c.ts, tf)
+        if cur is None or cur.ts != b:
+            if cur is not None:
+                out.append(cur)
+            cur = Candle(b, c.open, c.high, c.low, c.close, c.volume, bucket_end(b, tf))
+        else:
+            cur.high = max(cur.high, c.high)
+            cur.low = min(cur.low, c.low)
+            cur.close = c.close
+            cur.volume += c.volume
+    if cur is not None:
+        out.append(cur)
+    if as_of is not None:
+        out = [c for c in out if c.close_ts <= as_of]
+    return out
+
+
+# --------------------------------------------------------------------------- #
+class Provider:
+    name = "base"
+    synthetic = False
+
+    def load(self, asset: str, tf: str) -> Optional[Series]:  # pragma: no cover
+        raise NotImplementedError
+
+
+class CSVProvider(Provider):
+    """Lê data/market/{ASSET}_{TF}.csv (timestamp,open,high,low,close[,volume]).
+
+    Metadados opcionais em {ASSET}_{TF}.meta.json: {"source": ..., "volume_kind": ...}.
+    """
+    name = "csv"
+
+    def __init__(self, directory: Path | str | None = None):
+        self.dir = Path(directory) if directory else DATA_DIR / "market"
+
+    def available(self) -> list[tuple[str, str]]:
+        out = []
+        for p in sorted(self.dir.glob("*_*.csv")):
+            a, tf = p.stem.split("_", 1)
+            out.append((a.upper(), tf.upper()))
+        return out
+
+    def load(self, asset: str, tf: str) -> Optional[Series]:
+        p = self.dir / f"{asset}_{tf}.csv"
+        if not p.exists():
+            return None
+        meta = {}
+        mp = p.with_suffix(".meta.json")
+        if mp.exists():
+            meta = json.loads(mp.read_text())
+        candles = []
+        with p.open() as f:
+            rd = csv.DictReader(f)
+            for r in rd:
+                r = {k.strip().lower(): v for k, v in r.items() if k}
+                ts_key = next(k for k in ("timestamp", "time", "datetime", "date") if k in r)
+                candles.append(Candle(_parse_ts(r[ts_key]), float(r["open"]), float(r["high"]),
+                                      float(r["low"]), float(r["close"]), float(r.get("volume") or 0)))
+        candles = finalize(candles, tf)
+        vk = meta.get("volume_kind") or ("tick" if any(c.volume for c in candles) else "none")
+        return Series(asset, tf, candles, meta.get("source", f"CSV local ({p.name})"),
+                      synthetic=bool(meta.get("synthetic", False)), volume_kind=vk)
+
+
+def save_csv(series: Series, directory: Path | str | None = None) -> Path:
+    d = Path(directory) if directory else DATA_DIR / "market"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{series.asset}_{series.timeframe}.csv"
+    with p.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+        for c in series.candles:
+            w.writerow([dt.datetime.fromtimestamp(c.ts, dt.timezone.utc).isoformat(), c.open, c.high, c.low, c.close, c.volume])
+    p.with_suffix(".meta.json").write_text(json.dumps({
+        "source": series.source, "synthetic": series.synthetic, "volume_kind": series.volume_kind,
+        "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }, indent=2))
+    return p
+
+
+def _http_json(url: str, headers: Optional[dict] = None, timeout: int = 20) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": "trading-intelligence-office/1.0", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+class TwelveDataProvider(Provider):
+    """API Twelve Data (requer TWELVEDATA_API_KEY). Forex sem volume centralizado."""
+    name = "twelvedata"
+    TF = {"M1": "1min", "M5": "5min", "M15": "15min", "M30": "30min", "H1": "1h", "H4": "4h",
+          "D1": "1day", "W1": "1week", "MN": "1month"}
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.key = api_key or os.environ.get("TWELVEDATA_API_KEY")
+
+    def load(self, asset: str, tf: str, outputsize: int = 5000) -> Optional[Series]:
+        if not self.key or tf not in self.TF:
+            return None
+        q = urllib.parse.urlencode({"symbol": f"{asset[:3]}/{asset[3:]}", "interval": self.TF[tf],
+                                    "outputsize": outputsize, "timezone": "UTC", "apikey": self.key})
+        js = _http_json(f"https://api.twelvedata.com/time_series?{q}")
+        if js.get("status") != "ok":
+            raise RuntimeError(f"Twelve Data: {js.get('message')}")
+        candles = [Candle(_parse_ts(v["datetime"]), float(v["open"]), float(v["high"]), float(v["low"]),
+                          float(v["close"]), float(v.get("volume") or 0)) for v in js["values"]]
+        candles = finalize(candles, tf)
+        return Series(asset, tf, candles, "Twelve Data (api.twelvedata.com)", volume_kind="none")
+
+
+class YahooProvider(Provider):
+    """Endpoint público de gráficos do Yahoo Finance. Forex: volume = 0."""
+    name = "yahoo"
+    TF = {"M1": ("1m", "7d"), "M5": ("5m", "60d"), "M15": ("15m", "60d"), "M30": ("30m", "60d"),
+          "H1": ("60m", "730d"), "D1": ("1d", "10y"), "W1": ("1wk", "10y"), "MN": ("1mo", "10y")}
+
+    def load(self, asset: str, tf: str) -> Optional[Series]:
+        if tf not in self.TF:
+            return None
+        interval, rng = self.TF[tf]
+        js = _http_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{asset}=X?interval={interval}&range={rng}",
+                        headers={"User-Agent": "Mozilla/5.0"})
+        r = js["chart"]["result"][0]
+        q = r["indicators"]["quote"][0]
+        candles = []
+        for i, ts in enumerate(r["timestamp"]):
+            if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]):
+                continue
+            candles.append(Candle(int(ts), q["open"][i], q["high"][i], q["low"][i], q["close"][i], float(q["volume"][i] or 0)))
+        candles = finalize(candles, tf)
+        return Series(asset, tf, candles, "Yahoo Finance (query1.finance.yahoo.com)", volume_kind="none")
+
+
+# --------------------------------------------------------------------------- #
+BASE_PRICE = {"EURUSD": 1.085, "EURJPY": 162.0, "EURGBP": 0.855, "GBPJPY": 190.0, "USDJPY": 150.0,
+              "USDCAD": 1.36, "AUDJPY": 98.0, "CHFJPY": 170.0}
+
+
+class SyntheticProvider(Provider):
+    """GERADOR SINTÉTICO — NÃO SÃO DADOS DE MERCADO.
+
+    Passeio aleatório com regimes (tendência / lateralização / volatilidade),
+    sazonalidade intradiária e volume tipo "tick" correlacionado com a amplitude.
+    Serve apenas para testar o software sem conexão a fontes reais.
+    """
+    name = "synthetic"
+    synthetic = True
+
+    def __init__(self, seed: int = 7, bars: int = 6000, end: Optional[int] = None):
+        self.seed = seed
+        self.bars = bars
+        now = int(dt.datetime.now(dt.timezone.utc).timestamp()) if end is None else end
+        self.end = now
+
+    def load(self, asset: str, tf: str) -> Optional[Series]:
+        if tf not in TF_SECONDS or tf in ("MN", "Y1", "W1"):
+            return None
+        sec = TF_SECONDS[tf]
+        rnd = random.Random(f"{self.seed}-{asset}-{tf}")
+        price = BASE_PRICE.get(asset, 1.0)
+        vol = 0.0009 * math.sqrt(sec / 900)  # vol por candle relativa
+        end = self.end - self.end % sec
+        ts = end - int(self.bars * sec * 1.5)
+        candles: list[Candle] = []
+        drift = 0.0
+        regime_left = 0
+        vol_mult = 1.0
+        while ts + sec <= end:
+            d = dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+            if d.weekday() == 5 or (d.weekday() == 6 and d.hour < 22) or (d.weekday() == 4 and d.hour >= 22):
+                ts += sec
+                continue
+            if regime_left <= 0:
+                regime_left = rnd.randint(60, 400)
+                r = rnd.random()
+                drift = 0.0 if r < 0.4 else rnd.choice([-1, 1]) * vol * rnd.uniform(0.05, 0.22)
+                vol_mult = rnd.choice([0.7, 1.0, 1.0, 1.3, 1.8])
+            regime_left -= 1
+            hour = d.hour
+            session = 1.25 if 7 <= hour < 17 else (0.7 if hour < 6 else 1.0)
+            sigma = vol * vol_mult * session
+            ret = drift + rnd.gauss(0, sigma)
+            if rnd.random() < 0.01:
+                ret += rnd.choice([-1, 1]) * sigma * rnd.uniform(3, 6)  # choque
+            o = price
+            c = price * (1 + ret)
+            hi = max(o, c) * (1 + abs(rnd.gauss(0, sigma * 0.6)))
+            lo = min(o, c) * (1 - abs(rnd.gauss(0, sigma * 0.6)))
+            v = max(1.0, round(abs(ret) / sigma * 400 * session + rnd.uniform(50, 250)))
+            candles.append(Candle(ts, o, hi, lo, c, v, ts + sec))
+            price = c
+            ts += sec
+        candles = candles[-self.bars:]
+        return Series(asset, tf, candles, "SINTÉTICO (gerador interno — não é dado de mercado)",
+                      synthetic=True, volume_kind="tick")
+
+
+def get_provider(name: Optional[str] = None) -> Provider:
+    name = (name or os.environ.get("TIO_PROVIDER") or "auto").lower()
+    if name == "csv":
+        return CSVProvider()
+    if name == "twelvedata":
+        return TwelveDataProvider()
+    if name == "yahoo":
+        return YahooProvider()
+    if name == "synthetic":
+        return SyntheticProvider()
+    # auto: CSV se houver arquivos, senão sintético (explicitamente sinalizado)
+    csvp = CSVProvider()
+    if csvp.available():
+        return csvp
+    return SyntheticProvider()
+
+
+__all__ = ["ASSETS", "CSVProvider", "TwelveDataProvider", "YahooProvider", "SyntheticProvider",
+           "get_provider", "resample", "closed_only", "save_csv"]

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Trading Intelligence Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◆</span><div><b>AI TRADING INTELLIGENCE OFFICE</b><small>Central de análise · uso educacional · sem execução real</small></div></div>
+  <nav id="tabs">
+    <button data-tab="painel" class="on">Painel</button>
+    <button data-tab="sala">Sala de Operações</button>
+    <button data-tab="lab">Laboratório</button>
+    <button data-tab="memoria">Memória &amp; Evolução</button>
+  </nav>
+  <div class="meta" id="meta">carregando…</div>
+</header>
+<div id="banner" class="banner hidden"></div>
+
+<!-- ============================ PAINEL ============================ -->
+<main id="painel" class="tab on">
+  <section class="grid">
+    <div class="card span2" id="c-market">
+      <div class="ch"><h2>1 · Mercado atual</h2><select id="asset"></select></div>
+      <div class="price-row"><div id="px" class="px">—</div><div id="decision" class="pill">—</div></div>
+      <canvas id="chart" height="340"></canvas>
+      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg fib">Fibonacci</span></div>
+    </div>
+    <div class="card" id="c-decision">
+      <div class="ch"><h2>11 · Decisão coletiva</h2></div>
+      <div id="decision-box"></div>
+    </div>
+    <div class="card span3" id="c-assets">
+      <div class="ch"><h2>2 · Ativos monitorados</h2><button class="ghost" id="refresh">Atualizar</button></div>
+      <div class="table-wrap"><table id="assets-table"></table></div>
+    </div>
+    <div class="card span2"><div class="ch"><h2>3 · Tendência por temporalidade</h2></div><div id="trend-map" class="trend-map"></div></div>
+    <div class="card"><div class="ch"><h2>10 · Confluências</h2></div><div id="confluence"></div></div>
+    <div class="card"><div class="ch"><h2>4 · Mapa de liquidez</h2></div><div id="liquidity"></div></div>
+    <div class="card"><div class="ch"><h2>5 · Volume &amp; POC</h2></div><canvas id="profile" height="220"></canvas><div id="vp-info" class="muted small"></div></div>
+    <div class="card"><div class="ch"><h2>6 · RSI</h2></div><canvas id="rsi" height="150"></canvas><div id="rsi-info" class="muted small"></div></div>
+    <div class="card"><div class="ch"><h2>7 · Fibonacci</h2></div><div id="fib"></div></div>
+    <div class="card"><div class="ch"><h2>8 · Suportes &amp; resistências</h2></div><div id="sr"></div></div>
+    <div class="card"><div class="ch"><h2>9 · Notícias econômicas</h2></div><div id="news"></div></div>
+    <div class="card span2"><div class="ch"><h2>12 · Histórico de operações simuladas</h2></div><div id="history"></div></div>
+    <div class="card"><div class="ch"><h2>13 · Desempenho dos agentes</h2></div><div id="agent-perf"></div></div>
+  </section>
+</main>
+
+<!-- ============================ SALA ============================ -->
+<main id="sala" class="tab">
+  <section class="room">
+    <div class="agents" id="agent-cards"></div>
+    <aside class="chat card">
+      <div class="ch"><h2>Chat coletivo</h2><span class="muted small" id="chat-asset"></span></div>
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form"><input id="chat-input" autocomplete="off" placeholder="Qual é a situação do EUR/USD?"><button>Enviar</button></form>
+    </aside>
+  </section>
+</main>
+
+<!-- ============================ LAB ============================ -->
+<main id="lab" class="tab">
+  <section class="grid">
+    <div class="card">
+      <div class="ch"><h2>Configurar backtest</h2></div>
+      <form id="bt-form" class="form">
+        <label>Ativos<div id="bt-assets" class="checks"></div></label>
+        <label>Estratégia<select name="strategy" id="bt-strategy"></select></label>
+        <label>Agentes (combinação personalizada, opcional)<div id="bt-agents" class="checks"></div></label>
+        <div class="row2">
+          <label>Expiração (candles)<input name="expiry_bars" type="number" value="4" min="1" max="48"></label>
+          <label>Passo (candles)<input name="step" type="number" value="4" min="1" max="48"></label>
+        </div>
+        <div class="row2">
+          <label>Payout<input name="payout" type="number" step="0.01" value="0.80"></label>
+          <label>RSI sobrecompra<input name="rsi_overbought" type="number" value="80"></label>
+        </div>
+        <div class="row2">
+          <label>Início (fração)<input name="start_frac" type="number" step="0.05" value="0"></label>
+          <label>Fim (fração)<input name="end_frac" type="number" step="0.05" value="1"></label>
+        </div>
+        <button class="primary">Executar backtest</button>
+        <p class="muted small">Walk-forward: decisões só usam candles fechados; entrada na abertura do candle seguinte; memória isolada por execução.</p>
+      </form>
+      <div id="bt-progress" class="muted small"></div>
+    </div>
+    <div class="card span2"><div class="ch"><h2>Resultado</h2></div><div id="bt-summary" class="kpis"></div><canvas id="equity" height="220"></canvas><div id="bt-notes" class="small"></div></div>
+    <div class="card"><div class="ch"><h2>Por ativo</h2></div><div id="bt-asset"></div></div>
+    <div class="card"><div class="ch"><h2>Por horário (UTC)</h2></div><canvas id="bt-hour" height="200"></canvas></div>
+    <div class="card"><div class="ch"><h2>Por faixa de confluência</h2></div><div id="bt-conf"></div></div>
+    <div class="card"><div class="ch"><h2>Desempenho individual dos agentes</h2></div><div id="bt-agents-perf"></div></div>
+    <div class="card"><div class="ch"><h2>Processo × resultado</h2></div><div id="bt-quad"></div></div>
+    <div class="card"><div class="ch"><h2>Decisões e abstenções</h2></div><div id="bt-dec"></div></div>
+  </section>
+</main>
+
+<!-- ============================ MEMÓRIA ============================ -->
+<main id="memoria" class="tab">
+  <section class="grid">
+    <div class="card">
+      <div class="ch"><h2>Self Learning Intelligence</h2></div>
+      <p class="small">Testa melhorias em dados históricos (dentro da amostra) e só as incorpora se superarem a versão ativa <b>fora da amostra</b>. Atualizações que pioram são rejeitadas e registradas.</p>
+      <form id="learn-form" class="form">
+        <label>Ativos<div id="learn-assets" class="checks"></div></label>
+        <div class="row2"><label>Divisão IS/OOS<input name="split" type="number" step="0.05" value="0.7"></label>
+        <label>Mín. operações<input name="min_trades" type="number" value="30"></label></div>
+        <button class="primary">Executar ciclo de aprendizado</button>
+      </form>
+      <div id="learn-progress" class="muted small"></div>
+    </div>
+    <div class="card span2"><div class="ch"><h2>Controle de versões do modelo</h2></div><div id="versions"></div></div>
+    <div class="card span2"><div class="ch"><h2>Relatórios de evolução</h2></div><div id="reports"></div></div>
+    <div class="card"><div class="ch"><h2>Backtests registrados</h2></div><div id="bt-list"></div></div>
+    <div class="card span3"><div class="ch"><h2>Banco de conhecimento (lições)</h2></div><div id="lessons"></div></div>
+  </section>
+</main>
+
+<footer>Sistema educacional. Não executa operações com dinheiro real, não promete lucros e não inventa dados de mercado. Pontuação de confluência não é probabilidade de acerto.</footer>
+<script src="app.js"></script>
+</body>
+</html>

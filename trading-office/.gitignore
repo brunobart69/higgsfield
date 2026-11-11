@@ -1,0 +1,6 @@
+data/office.db*
+data/market/*.csv
+data/market/*.meta.json
+data/news/*.json
+__pycache__/
+.pytest_cache/
