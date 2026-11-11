@@ -44,5 +44,8 @@ if not defined PY (
 echo  Usando: %PY%
 echo  Abrindo o painel no navegador em alguns segundos...
 start "" /min cmd /c "timeout /t 6 >nul & start http://127.0.0.1:8765"
-%PY% -m tio --provider mt5 serve
+echo  Baixando o calendario economico da semana...
+%PY% -m tio news --fetch >nul 2>nul
+echo  Treino automatico: 8 pares em M1, M5 e M15 (operacoes apenas simuladas).
+%PY% -m tio --provider mt5 --tf M5 --tfs M1,M5,M15 serve --auto
 pause

@@ -9,7 +9,8 @@ from .context import MarketContext
 from .models import BEAR, BULL, NEUTRAL, DIR_LABEL, GROUPS, TIMEFRAMES, Message, asset_label
 
 STRATEGIES = {
-    "comite": ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ"],
+    "comite": ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I"],
+    "indicadores_mt5": ["NEWS", "MT5I", "MTF", "SR", "LIQ"],
     "tendencia": ["NEWS", "PA", "RET", "SR", "FIB", "MTF", "LIQ"],
     "reversao": ["NEWS", "REV", "LIQ", "VOL", "SR", "VP", "PA"],
     "estrutura_liquidez": ["NEWS", "PA", "LIQ", "MTF", "SR"],

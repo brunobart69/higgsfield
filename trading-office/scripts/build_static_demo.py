@@ -28,14 +28,16 @@ def main() -> None:
     from tio.models import ASSETS
     from tio.service import OfficeService
 
-    svc = OfficeService(provider=get_provider(args.provider), memory=Memory(os.environ["TIO_DB"]))
+    TFS = ["M1", "M5", "M15"]
+    svc = OfficeService(provider=get_provider(args.provider), memory=Memory(os.environ["TIO_DB"]), tfs=TFS)
     print("backtest…", file=sys.stderr)
     bt = svc.run_backtest({"assets": ["EURUSD"], "strategy": "comite", "expiry_bars": 4, "step": 4})
     print("aprendizado…", file=sys.stderr)
     svc.learn({"assets": ["EURUSD", "USDJPY", "EURJPY"], "step": 8, "min_trades": 30, "max_candidates": 3})
     snap = {
-        "status": svc.status(), "agents": svc.agents_catalog(), "overview": svc.overview(),
-        "analysis": {a: svc.analyze(a) for a in ASSETS}, "history": svc.history(),
+        "status": svc.status(), "agents": svc.agents_catalog(), "overview": {t: svc.overview(t) for t in TFS},
+        "analysis": {t: {a: svc.analyze(a, t) for a in ASSETS} for t in TFS},
+        "scan": {t: svc.scan(t) for t in TFS}, "mt5": svc.mt5_info(), "history": svc.history(),
         "news": {"loaded": svc.news.loaded, "events": [e.to_dict() for e in svc.news.events[-200:]]},
         "memory": svc.memory_view(), "backtest": bt,
         "chat": {a: svc.chat(f"Qual é a situação do {a[:3]}/{a[3:]}?") for a in ASSETS},
@@ -62,8 +64,11 @@ window.fetch = (url, opts) => {
   const body = opts && opts.body ? JSON.parse(opts.body) : {};
   if (p.endsWith("/api/status")) return _json(SNAP.status);
   if (p.endsWith("/api/agents")) return _json(SNAP.agents);
-  if (p.endsWith("/api/overview")) return _json(SNAP.overview);
-  if (p.endsWith("/api/analysis")) return _json(SNAP.analysis[q.get("asset")] || SNAP.analysis.EURUSD);
+  const tf = SNAP.scan[q.get("tf")] ? q.get("tf") : "M15";
+  if (p.endsWith("/api/overview")) return _json(SNAP.overview[tf]);
+  if (p.endsWith("/api/scan")) return _json(SNAP.scan[tf]);
+  if (p.endsWith("/api/mt5")) return _json(SNAP.mt5);
+  if (p.endsWith("/api/analysis")) return _json(SNAP.analysis[tf][q.get("asset")] || SNAP.analysis[tf].EURUSD);
   if (p.endsWith("/api/history")) return _json(SNAP.history);
   if (p.endsWith("/api/news")) return _json(SNAP.news);
   if (p.endsWith("/api/memory")) return _json(SNAP.memory);
@@ -84,8 +89,8 @@ window.fetch = (url, opts) => {
 };
 """.replace("__SNAP__", json.dumps(snap, ensure_ascii=False, default=str).replace("</", "<\\/"))
     demo_note = ('<div class="demo">Versão de demonstração: esta página mostra um instantâneo já calculado pelo sistema. '
-                 'O Laboratório exibe um backtest pré-calculado (EUR/USD, configuração padrão) e o chat responde sobre os 8 ativos '
-                 'monitorados. Para análises novas e dados reais, o programa precisa rodar num computador.</div>')
+                 'O Laboratório exibe um backtest pré-calculado (EUR/USD, M15) e o chat responde sobre os 8 ativos '
+                 'monitorados. A ligação com o MT5 e o treino automático só funcionam no programa instalado. Para análises novas e dados reais, o programa precisa rodar num computador.</div>')
     body = body.replace('<div id="banner"', demo_note + '\n<div id="banner"', 1)
     page = f"""<title>Trading Intelligence Office</title>
 <meta name="claude:viewport-fit-sides" content="cover">

@@ -12,17 +12,28 @@
 <header class="top">
   <div class="brand"><span class="logo">◆</span><div><b>AI TRADING INTELLIGENCE OFFICE</b><small>Central de análise · uso educacional · sem execução real</small></div></div>
   <nav id="tabs">
-    <button data-tab="painel" class="on">Painel</button>
+    <button data-tab="multi" class="on">Multi-Pares</button>
+    <button data-tab="painel">Painel</button>
     <button data-tab="sala">Sala de Operações</button>
     <button data-tab="lab">Laboratório</button>
     <button data-tab="memoria">Memória &amp; Evolução</button>
+    <button data-tab="mt5">MT5</button>
   </nav>
+  <div class="tfsel" id="tfsel" role="group" aria-label="Temporalidade"></div>
   <div class="meta" id="meta">carregando…</div>
 </header>
 <div id="banner" class="banner hidden"></div>
 
 <!-- ============================ PAINEL ============================ -->
-<main id="painel" class="tab on">
+<main id="multi" class="tab on">
+  <div class="multi-head">
+    <div><h2>Todos os pares ao mesmo tempo</h2><p class="muted small" id="multi-info">carregando…</p></div>
+    <div class="multi-sum" id="multi-sum"></div>
+  </div>
+  <section class="multi-grid" id="multi-grid"></section>
+</main>
+
+<main id="painel" class="tab">
   <section class="grid">
     <div class="card span2" id="c-market">
       <div class="ch"><h2>1 · Mercado atual</h2><select id="asset"></select></div>
@@ -70,7 +81,8 @@
       <div class="ch"><h2>Configurar backtest</h2></div>
       <form id="bt-form" class="form">
         <label>Ativos<div id="bt-assets" class="checks"></div></label>
-        <label>Estratégia<select name="strategy" id="bt-strategy"></select></label>
+        <div class="row2"><label>Temporalidade<select name="timeframe" id="bt-tf"><option>M1</option><option>M5</option><option selected>M15</option></select></label>
+        <label>Estratégia<select name="strategy" id="bt-strategy"></select></label></div>
         <label>Agentes (combinação personalizada, opcional)<div id="bt-agents" class="checks"></div></label>
         <div class="row2">
           <label>Expiração (candles)<input name="expiry_bars" type="number" value="4" min="1" max="48"></label>
@@ -99,6 +111,24 @@
   </section>
 </main>
 
+<!-- ============================ MT5 ============================ -->
+<main id="mt5" class="tab">
+  <section class="grid">
+    <div class="card"><div class="ch"><h2>Conexão</h2></div><div id="mt5-conn"></div></div>
+    <div class="card span2"><div class="ch"><h2>Seus indicadores</h2><button class="primary" id="mt5-save">Salvar escolha</button></div>
+      <p class="small">Marque os indicadores que o escritório deve ler. Ele usa as configurações padrão de cada indicador.</p>
+      <div id="mt5-list" class="ind-list"></div></div>
+    <div class="card span2"><div class="ch"><h2>Como ligar o exportador (uma vez só)</h2></div>
+      <ol class="steps">
+        <li>No MetaTrader 5, abra o <b>Navegador</b> (Ctrl+N) → <b>Expert Advisors</b>. Se não aparecer <b>TIO_Exportador</b>, clique com o botão direito → <b>Atualizar</b>.</li>
+        <li>Arraste o <b>TIO_Exportador</b> para qualquer gráfico e clique em <b>OK</b>. Ele não abre ordens: só copia os valores dos indicadores.</li>
+        <li>Marque seus indicadores aqui ao lado e clique em <b>Salvar escolha</b>. Em alguns segundos o status abaixo fica verde.</li>
+      </ol>
+      <div id="mt5-exp"></div></div>
+    <div class="card"><div class="ch"><h2>Seus indicadores acertam?</h2></div><div id="mt5-stats"></div></div>
+  </section>
+</main>
+
 <!-- ============================ MEMÓRIA ============================ -->
 <main id="memoria" class="tab">
   <section class="grid">
@@ -107,6 +137,7 @@
       <p class="small">Testa melhorias em dados históricos (dentro da amostra) e só as incorpora se superarem a versão ativa <b>fora da amostra</b>. Atualizações que pioram são rejeitadas e registradas.</p>
       <form id="learn-form" class="form">
         <label>Ativos<div id="learn-assets" class="checks"></div></label>
+        <label>Temporalidade<select name="timeframe"><option>M1</option><option>M5</option><option selected>M15</option></select></label>
         <div class="row2"><label>Divisão IS/OOS<input name="split" type="number" step="0.05" value="0.7"></label>
         <label>Mín. operações<input name="min_trades" type="number" value="30"></label></div>
         <button class="primary">Executar ciclo de aprendizado</button>

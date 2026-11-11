@@ -12,7 +12,8 @@ const decCls = (d) => d.includes("ALTA") ? "up" : d.includes("BAIXA") ? "down" :
 const tsLbl = (ts) => new Date(ts * 1000).toISOString().slice(0, 16).replace("T", " ");
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
-const S = { status: null, asset: "EURUSD", analysis: null, agents: [] };
+const S = { status: null, asset: "EURUSD", analysis: null, agents: [], tf: "M15" };
+try { S.tf = localStorage.getItem("tio_tf") || "M15"; } catch (e) { /* sem armazenamento */ }
 
 // ------------------------------------------------------------------ navegação
 $$("#tabs button").forEach((b) => b.onclick = () => {
@@ -21,7 +22,10 @@ $$("#tabs button").forEach((b) => b.onclick = () => {
   if (b.dataset.tab === "memoria") loadMemory();
   if (b.dataset.tab === "sala") renderRoom();
   if (b.dataset.tab === "painel" && S.analysis) drawAll();
+  if (b.dataset.tab === "multi") loadMulti();
+  if (b.dataset.tab === "mt5") loadMT5();
 });
+const activeTab = () => ($(".tab.on") || {}).id;
 
 // ------------------------------------------------------------------ canvas helpers
 function ctx2d(cv) {
@@ -130,6 +134,16 @@ async function loadStatus() {
   $("#bt-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i === 0 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");
   $("#learn-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i < 3 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");
   $("#bt-strategy").innerHTML = st.strategies.map((s) => `<option>${s}</option>`).join("");
+  const tfs = st.tfs || ["M15"]; if (!tfs.includes(S.tf)) S.tf = tfs[0];
+  $("#tfsel").innerHTML = tfs.map((t) => `<button data-tf="${t}" class="${t === S.tf ? "on" : ""}">${t}</button>`).join("");
+  $$("#tfsel button").forEach((b) => b.onclick = () => {
+    S.tf = b.dataset.tf; try { localStorage.setItem("tio_tf", S.tf); } catch (e) { /* ignore */ }
+    $$("#tfsel button").forEach((x) => x.classList.toggle("on", x === b)); S.chatShown = null;
+    loadAnalysis(); loadOverview(); if (activeTab() === "multi") loadMulti();
+  });
+  const ap = st.autopilot || {};
+  $("#meta").textContent = `${st.source || "sem fonte"} · último candle ${st.last_candle || "—"} · modelo ${st.model_version}` +
+    (ap.running ? ` · treino automático ligado (${ap.cycles} ciclos)` : "");
 }
 
 async function loadAgents() {
@@ -144,8 +158,8 @@ async function loadAgents() {
 
 async function loadOverview() {
   $("#assets-table").innerHTML = `<tr><td class="muted">analisando os 8 ativos…</td></tr>`;
-  const ov = await api("/api/overview");
-  const tfs = ["D1", "H4", "H1", "M15"];
+  const ov = await api(`/api/overview?tf=${S.tf}`);
+  const tfs = S.tf === "M15" ? ["D1", "H4", "H1", "M15"] : ["H4", "H1", "M15", S.tf];
   const tcls = (l) => l === "ALTA" ? "up" : l === "BAIXA" ? "down" : "muted";
   $("#assets-table").innerHTML = `<tr><th>Ativo</th><th class="num">Preço</th><th class="num">24h</th>${tfs.map((t) => `<th>${t}</th>`).join("")}<th>Decisão</th><th class="num">Confluência</th></tr>` +
     ov.map((r) => r.error ? `<tr><td>${r.label}</td><td colspan="8" class="muted">${esc(r.error)}</td></tr>` :
@@ -156,7 +170,7 @@ async function loadOverview() {
 }
 
 async function loadAnalysis() {
-  const an = await api(`/api/analysis?asset=${S.asset}`);
+  const an = await api(`/api/analysis?asset=${S.asset}&tf=${S.tf}`);
   if (an.error) { $("#decision-box").textContent = an.error; return; }
   S.analysis = an; drawAll(); renderRoom();
 }
@@ -217,8 +231,8 @@ async function loadHistory() {
   const h = await api("/api/history");
   const t = h.trades || [];
   const m = h.metrics;
-  $("#history").innerHTML = (m ? `<div class="kpis">${kpi("Operações", m.total)}${kpi("Acerto", pct(m.win_rate))}${kpi("Expectativa", m.expectancy)}${kpi("Drawdown", m.max_drawdown)}</div>` : "") +
-    (t.length ? `<div class="table-wrap"><table><tr><th>Ativo</th><th>Dir.</th><th>Entrada (UTC)</th><th>Expiração</th><th class="num">Entrada</th><th class="num">Saída</th><th>Resultado</th><th>Processo × resultado</th></tr>${t.slice(0, 25).map((r) => `<tr><td>${r.asset}</td><td class="${dirCls(r.direction)}">${r.direction > 0 ? "CALL" : "PUT"}</td><td class="mono small">${tsLbl(r.entry_ts)}</td><td class="mono small">${tsLbl(r.expiry_ts)}</td><td class="num">${fmtP(r.entry_price)}</td><td class="num">${fmtP(r.exit_price)}</td><td class="${r.result === "WIN" ? "up" : r.result === "LOSS" ? "down" : "muted"}">${r.result || "em aberto"}</td><td class="small">${esc(r.review?.quadrant || "")}</td></tr>`).join("")}</table></div>`
+  $("#history").innerHTML = (m ? `<div class="kpis">${kpi("Operações", m.total)}${kpi("Acerto", pct(m.win_rate))}${kpi("Expectativa", m.expectancy)}${kpi("Drawdown", m.max_drawdown)}</div>${m.by_tf ? `<p class="small muted">${Object.entries(m.by_tf).map(([t, v]) => `${t}: ${v.wins}/${v.n} (${v.pnl >= 0 ? "+" : ""}${v.pnl} u)`).join(" · ")}</p>` : ""}` : "") +
+    (t.length ? `<div class="table-wrap"><table><tr><th>Ativo</th><th>TF</th><th>Dir.</th><th>Entrada (UTC)</th><th>Expiração</th><th class="num">Entrada</th><th class="num">Saída</th><th>Resultado</th><th>Processo × resultado</th></tr>${t.slice(0, 25).map((r) => `<tr><td>${r.asset}</td><td class="mono small">${r.tf}</td><td class="${dirCls(r.direction)}">${r.direction > 0 ? "CALL" : "PUT"}</td><td class="mono small">${tsLbl(r.entry_ts)}</td><td class="mono small">${tsLbl(r.expiry_ts)}</td><td class="num">${fmtP(r.entry_price)}</td><td class="num">${fmtP(r.exit_price)}</td><td class="${r.result === "WIN" ? "up" : r.result === "LOSS" ? "down" : "muted"}">${r.result || "em aberto"}</td><td class="small">${esc(r.review?.quadrant || "")}</td></tr>`).join("")}</table></div>`
       : `<p class="muted small">Nenhuma operação simulada ao vivo ainda. Elas são abertas somente quando o Head Trader decide CENÁRIO DE ALTA/BAIXA com aprovação do Risk Manager, e resolvidas após a expiração.</p>`) +
     `<h3>Decisões registradas</h3><ul class="list">${(h.decisions || []).slice(0, 8).map((d) => `<li><span class="mono small">${tsLbl(d.as_of)}</span> ${d.asset} <span class="pill ${decCls(d.decision)}">${esc(d.decision)}</span> <span class="muted small">conf. ${d.confluence} · processo ${(d.process_quality || 0).toFixed(2)}</span></li>`).join("")}</ul>`;
 }
@@ -253,7 +267,7 @@ $("#chat-form").onsubmit = async (e) => {
   const r = await post("/api/chat", { message: q });
   if (r.transcript?.length) showTranscript(r.transcript, r.asset);
   addMsg(r.speaker || "Head Trader", r.reply, "decision");
-  if (r.asset && r.asset !== S.asset) { S.asset = r.asset; $("#asset").value = r.asset; const an = await api(`/api/analysis?asset=${r.asset}`); S.analysis = an; renderRoom(); }
+  if (r.asset && r.asset !== S.asset) { S.asset = r.asset; $("#asset").value = r.asset; const an = await api(`/api/analysis?asset=${r.asset}&tf=${S.tf}`); S.analysis = an; renderRoom(); }
 };
 
 // ------------------------------------------------------------------ jobs
@@ -307,10 +321,78 @@ async function loadMemory() {
   $("#lessons").innerHTML = m.lessons.length ? `<div class="table-wrap"><table><tr><th>Quando</th><th>Agente</th><th>Ativo</th><th>Contexto</th><th>Classe</th><th>Lição</th></tr>${m.lessons.map((l) => `<tr><td class="mono small">${esc(l.created)}</td><td>${esc(l.agent)}</td><td>${esc(l.asset)}</td><td class="small">${esc(l.tag)}</td><td class="${l.outcome_class === "erro" ? "down" : "up"}">${esc(l.outcome_class)}</td><td class="small">${esc(l.description)}</td></tr>`).join("")}</table></div>` : `<p class="muted small">As lições são registradas quando simulações ao vivo expiram. (Backtests usam memória isolada para evitar vazamento de informação futura.)</p>`;
 }
 
+// ------------------------------------------------------------------ multi-pares
+function miniChart(cv, cs) {
+  const [c, W, H] = ctx2d(cv); c.clearRect(0, 0, W, H); if (!cs || !cs.length) return;
+  const lo = Math.min(...cs.map((k) => k[3])), hi = Math.max(...cs.map((k) => k[2])); const r = hi - lo || 1;
+  const y = (p) => 3 + (H - 6) * (1 - (p - lo) / r); const bw = W / cs.length;
+  cs.forEach((k, i) => {
+    const [, o, h, l, cl] = k; const x = i * bw + bw / 2;
+    c.strokeStyle = c.fillStyle = cl >= o ? css("--green") : css("--red");
+    c.beginPath(); c.moveTo(x, y(h)); c.lineTo(x, y(l)); c.stroke();
+    const t = y(Math.max(o, cl)); c.fillRect(x - bw * 0.3, t, Math.max(1, bw * 0.6), Math.max(1, y(Math.min(o, cl)) - t));
+  });
+}
+
+async function loadMulti() {
+  const d = await api(`/api/scan?tf=${S.tf}`);
+  const ap = (S.status || {}).autopilot || {};
+  $("#multi-info").innerHTML = `Velas de <b>${esc(d.tf)}</b> · expiração simulada de ${d.expiry_bars} velas · ` +
+    (ap.running ? "treino automático ligado: o escritório analisa sozinho e registra operações simuladas" : "treino automático desligado") +
+    " · atualiza sozinho a cada 15 s";
+  const counts = {}; d.cards.forEach((c) => { if (c.decision) counts[c.decision] = (counts[c.decision] || 0) + 1; });
+  $("#multi-sum").innerHTML = Object.entries(counts).map(([k, v]) => `<span class="pill ${decCls(k)}">${esc(k)} · ${v}</span>`).join("");
+  $("#multi-grid").innerHTML = d.cards.map((c) => c.error ? `<div class="pair"><b>${c.label}</b><span class="muted small">${esc(c.error)}</span></div>` : `
+    <div class="pair ${decCls(c.decision)}" data-a="${c.asset}">
+      <div class="pair-top"><b>${c.label}</b><span class="mono">${fmtP(c.price)}</span></div>
+      <canvas height="90"></canvas>
+      <div><span class="pill ${decCls(c.decision)}">${esc(c.decision)}</span> <span class="small muted">confluência ${c.confluence} · ${c.agreeing} fatores</span></div>
+      <div class="votes" title="Viés de cada agente">${c.votes.map((v) => `<span class="vote ${v.abstain ? "off" : dirCls(v.bias)}" title="${v.code}: ${v.abstain ? "sem dados" : dirLbl[v.bias]} (${v.conf})">${v.code}</span>`).join("")}</div>
+      <div class="pair-foot"><span>${c.open_trade ? `<b class="${dirCls(c.open_trade.direction)}">simulação ${c.open_trade.direction > 0 ? "CALL" : "PUT"} até ${tsLbl(c.open_trade.expiry_ts).slice(11)}</b>` : `vela fechada ${esc(c.as_of.slice(11, 16))} UTC`}</span>
+        <span>últimas: ${c.recent.length ? c.recent.map((r) => `<i class="res ${r}" title="${r}"></i>`).join("") : "—"}</span></div>
+      ${c.news_avoid ? '<div class="warn">⚠ notícia de alto impacto</div>' : ""}
+    </div>`).join("");
+  $$("#multi-grid .pair[data-a]").forEach((el) => {
+    const card = d.cards.find((x) => x.asset === el.dataset.a); miniChart($("canvas", el), card.candles);
+    el.onclick = () => { S.asset = el.dataset.a; $("#asset").value = S.asset; loadAnalysis(); $('#tabs button[data-tab="painel"]').click(); };
+  });
+}
+
+// ------------------------------------------------------------------ MT5
+async function loadMT5() {
+  const m = await api("/api/mt5");
+  if (!m.connected) {
+    $("#mt5-conn").innerHTML = `<p class="small">${esc(m.note)}</p>`;
+    ["#mt5-list", "#mt5-exp", "#mt5-stats"].forEach((k) => { $(k).innerHTML = ""; });
+    return;
+  }
+  $("#mt5-conn").innerHTML = `<p><span class="ok-dot on"></span>Conectado: <b>${esc(m.broker)}</b></p><p class="small">Somente leitura: nenhuma ordem é enviada.</p>
+    <table>${Object.entries(m.symbols).map(([a, s]) => `<tr><td>${a.slice(0, 3)}/${a.slice(3)}</td><td class="mono small ${s ? "" : "down"}">${esc(s || "não encontrado")}</td></tr>`).join("")}</table>`;
+  const sel = new Set(m.selected);
+  $("#mt5-list").innerHTML = m.available.length
+    ? m.available.map((n) => `<label><input type="checkbox" value="${esc(n)}" ${sel.has(n) ? "checked" : ""}>${esc(n)}</label>`).join("")
+    : `<p class="muted small">Nenhum indicador compilado (.ex5) encontrado na pasta de indicadores do seu MT5.</p>`;
+  const ex = m.exporter || {};
+  $("#mt5-exp").innerHTML = `<p class="small"><span class="ok-dot ${ex.running ? "on" : ""}"></span>${ex.running ? "Exportador funcionando" : "Exportador ainda não está rodando"} · ${esc(m.exporter_install || "")}</p>
+    ${ex.status_text ? `<pre>${esc(ex.status_text)}</pre>` : ""}${ex.files && ex.files.length ? `<p class="small muted">${ex.files.length} arquivos exportados</p>` : ""}`;
+  const stats = Object.entries(m.stats || {});
+  $("#mt5-stats").innerHTML = stats.length
+    ? `<table><tr><th>Indicador</th><th class="num">sinais</th><th class="num">acerto</th><th class="num">IC95%</th></tr>${stats.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.n}</td><td class="num ${v.ci[0] > 0.5 ? "up" : v.ci[1] < 0.5 ? "down" : ""}">${pct(v.hit_rate)}</td><td class="num muted">${pct(v.ci[0], 0)}–${pct(v.ci[1], 0)}</td></tr>`).join("")}</table>
+       <p class="muted small">Acerto = direção do sinal comparada com a direção real até a expiração simulada. Só é vantagem se a faixa IC95% inteira ficar acima do ponto de equilíbrio do payout.</p>`
+    : `<p class="muted small">Ainda sem sinais avaliados. Com o exportador ligado e o treino automático rodando, cada seta dos seus indicadores é conferida depois da expiração.</p>`;
+}
+$("#mt5-save").onclick = async () => {
+  const names = $$("#mt5-list input:checked").map((i) => i.value);
+  const r = await post("/api/mt5/indicators", { names });
+  $("#mt5-save").textContent = r.error ? "Erro" : "Salvo ✓";
+  setTimeout(() => { $("#mt5-save").textContent = "Salvar escolha"; loadMT5(); }, 1500);
+};
+
 // ------------------------------------------------------------------ boot
 $("#refresh").onclick = () => { loadOverview(); loadAnalysis(); loadHistory(); };
 window.addEventListener("resize", () => { if (S.analysis && $("#painel").classList.contains("on")) drawAll(); });
 (async () => {
-  await loadStatus(); await loadAgents(); await loadAnalysis(); loadOverview(); loadHistory();
-  setInterval(() => { loadAnalysis(); loadHistory(); }, 60000);
+  await loadStatus(); await loadAgents(); loadMulti(); await loadAnalysis(); loadOverview(); loadHistory();
+  setInterval(() => { const t = activeTab(); if (t === "multi") loadMulti(); else if (t === "painel") { loadAnalysis(); loadHistory(); } }, 15000);
+  setInterval(() => { loadStatus(); if (activeTab() === "mt5") loadMT5(); }, 30000);
 })();

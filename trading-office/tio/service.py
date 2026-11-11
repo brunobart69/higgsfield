@@ -14,37 +14,84 @@ from .data.news import NewsStore
 from .data.providers import Provider, get_provider
 from .meeting import STRATEGIES, Office
 from .memory import Memory
-from .models import ASSETS, DIR_LABEL, TF_SECONDS, asset_label, fmt_ts, normalize_asset
+from .models import ASSETS, DIR_LABEL, TF_SECONDS, TIMEFRAMES, asset_label, fmt_ts, normalize_asset
 
 ALIASES = {"EURO DOLAR": "EURUSD", "EURO DÓLAR": "EURUSD", "EURODOLAR": "EURUSD", "FIBER": "EURUSD",
            "CABLE": None, "IENE": "USDJPY", "LOONIE": "USDCAD", "GOPHER": "GBPJPY", "GUPPY": "GBPJPY"}
 
 
+DEFAULT_EXPIRY = {"M1": 3, "M5": 3, "M15": 4, "M30": 2, "H1": 2}
+CACHE_TTL = {"M1": 10, "M5": 20, "M15": 30, "M30": 60, "H1": 60, "H4": 180, "D1": 600, "W1": 1800, "MN": 3600}
+
+
 class OfficeService:
     def __init__(self, provider: Optional[Provider] = None, memory: Optional[Memory] = None, base_tf: str = "M15",
-                 expiry_bars: int = 4, cache_ttl: int = 60):
+                 tfs: Optional[list[str]] = None, expiry: Optional[dict] = None):
         self.provider = provider or get_provider()
         self.memory = memory or Memory()
         self.news = NewsStore()
         self.base_tf = base_tf
-        self.expiry_bars = expiry_bars
-        self.cache_ttl = cache_ttl
-        self._data: dict[str, tuple[float, MarketData]] = {}
+        self.tfs = tfs or [base_tf]
+        if base_tf not in self.tfs:
+            self.tfs.insert(0, base_tf)
+        self.expiry = {**DEFAULT_EXPIRY, **(expiry or {})}
+        self._series: dict[tuple, tuple[float, object]] = {}
+        self._data: dict[tuple, tuple[tuple, MarketData]] = {}
         self._analysis: dict[tuple, dict] = {}
         self.lock = threading.RLock()
         self.office = Office()
         self.jobs: dict[str, dict] = {}
+        self.autopilot = {"running": False, "cycles": 0, "last": None, "errors": []}
 
     # ------------------------------------------------------------------ dados
-    def data(self, asset: str) -> Optional[MarketData]:
+    def _series_cached(self, asset: str, tf: str):
+        k = (asset, tf)
+        hit = self._series.get(k)
+        if hit and time.time() - hit[0] < CACHE_TTL.get(tf, 60):
+            return hit[1]
+        try:
+            srs = self.provider.load(asset, tf)
+        except Exception:  # fonte indisponível para esta TF
+            srs = None
+        self._series[k] = (time.time(), srs)
+        return srs
+
+    def data(self, asset: str, tf: Optional[str] = None) -> Optional[MarketData]:
+        tf = tf or self.base_tf
         with self.lock:
-            hit = self._data.get(asset)
-            if hit and time.time() - hit[0] < self.cache_ttl:
+            base = self._series_cached(asset, tf)
+            if base is None or not len(base):
+                return None
+            extra = {}
+            if getattr(self.provider, "native_multi_tf", False):
+                for t in TIMEFRAMES:
+                    if t != tf:
+                        srs = self._series_cached(asset, t)
+                        if srs is not None and len(srs):
+                            extra[t] = srs
+            stamp = (id(base),) + tuple(sorted((t, id(v)) for t, v in extra.items()))
+            hit = self._data.get((asset, tf))
+            if hit and hit[0] == stamp:
                 return hit[1]
-            md = MarketData.load(self.provider, asset, self.base_tf)
-            if md is not None:
-                self._data[asset] = (time.time(), md)
+            from .data.providers import closed_only
+            from .models import Series
+            b = Series(base.asset, base.timeframe, closed_only(base.candles), base.source, base.synthetic, base.volume_kind)
+            if not b.candles:
+                return None
+            md = MarketData(asset, b, extra)
+            md.indicators = self.load_user_indicators(asset)
+            self._data[(asset, tf)] = (stamp, md)
             return md
+
+    def load_user_indicators(self, asset: str) -> dict:
+        if not hasattr(self.provider, "indicator_store"):
+            return {}
+        from .data.mt5_indicators import load_overrides
+        try:
+            store, sym = self.provider.indicator_store(asset)
+            return store.load(sym, asset, load_overrides()) if sym else {}
+        except Exception:
+            return {}
 
     def status(self) -> dict:
         md = self.data(ASSETS[0])
@@ -52,12 +99,13 @@ class OfficeService:
         cov = self.news.coverage()
         return {"provider": self.provider.name, "source": md.source if md else None,
                 "synthetic": bool(md and md.synthetic), "volume_kind": md.volume_kind if md else None,
-                "base_tf": self.base_tf, "assets": ASSETS, "model_version": version,
+                "base_tf": self.base_tf, "tfs": self.tfs, "expiry": {t: self.expiry.get(t, 3) for t in self.tfs},
+                "assets": ASSETS, "model_version": version,
                 "news_loaded": self.news.loaded, "news_events": len(self.news.events),
                 "news_coverage": [fmt_ts(cov[0]), fmt_ts(cov[1])] if cov else None,
                 "last_candle": fmt_ts(md.base[-1].close_ts) if md else None, "payout": params.payout,
-                "real_money": binary.REAL_MONEY_ENABLED,
-                "strategies": list(STRATEGIES)}
+                "real_money": binary.REAL_MONEY_ENABLED, "autopilot": self.autopilot,
+                "mt5": self.provider.name == "mt5", "strategies": list(STRATEGIES)}
 
     def agents_catalog(self) -> list[dict]:
         out = [cls().card() for cls in SPECIALISTS] + [RiskManager().card(), HeadTrader().card()]
@@ -71,40 +119,56 @@ class OfficeService:
         return out
 
     # ------------------------------------------------------------------ análise
-    def analyze(self, asset: str, record: bool = True) -> dict:
-        md = self.data(asset)
+    def analyze(self, asset: str, tf: Optional[str] = None, record: bool = True) -> dict:
+        tf = tf or self.base_tf
+        md = self.data(asset, tf)
         if md is None:
-            return {"error": f"Sem dados para {asset} na fonte '{self.provider.name}'."}
+            return {"error": f"Sem dados de {asset} em {tf} na fonte '{self.provider.name}'."}
         version, params = self.memory.active_version()
-        key = (asset, md.base[-1].close_ts, version)
+        key = (asset, tf, md.base[-1].close_ts, version)
         with self.lock:
             if key in self._analysis:
                 return self._analysis[key]
-            self.resolve_pending(asset, md)
+            self.resolve_pending(asset, tf, md)
             ctx = md.context(None, self.news, self.memory, params)
             res = self.office.meet(ctx, version)
             res["as_of_label"] = fmt_ts(res["as_of"])
             res["chart"] = self.chart(md, res)
+            res["expiry_bars"] = self.expiry.get(tf, 3)
             if record:
-                exists = self.memory.q("SELECT id FROM decisions WHERE mode='live' AND asset=? AND as_of=? AND model_version=?",
-                                       (asset, res["as_of"], version))
-                if not exists:
-                    did = self.memory.record_decision(res, self.office.strategy)
-                    plan = binary.plan_trade(res, md.base, self.base_tf, self.expiry_bars, params.payout, self.office.strategy)
-                    if plan and not self.memory.open_trades(asset):
-                        self.memory.open_trade(did, plan)
-                    elif not plan:
-                        # decisão sem operação também é avaliada (qualidade de "não operar")
-                        self.memory.x("INSERT INTO trades(decision_id,run_id,mode,asset,tf,strategy,direction,entry_ts,expiry_ts,"
-                                      "payout,stake,hour,confluence,confluence_class,process_quality,synthetic,status)"
-                                      " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                                      (did, self.memory.run_id, "live-shadow", asset, self.base_tf, self.office.strategy,
-                                       res["lean"], res["as_of"], res["as_of"] + self.expiry_bars * TF_SECONDS[self.base_tf], params.payout, 0,
-                                       0, res["confluence"]["score"], res["confluence"]["classification"],
-                                       res["process"]["score"], int(res["synthetic"]), "open"))
-                    res["decision_id"] = did
+                self._record(asset, tf, md, res, params, version)
             self._analysis[key] = res
+            if len(self._analysis) > 400:
+                for k in list(self._analysis)[:200]:
+                    self._analysis.pop(k, None)
             return res
+
+    def _record(self, asset, tf, md, res, params, version) -> None:
+        exists = self.memory.q("SELECT id FROM decisions WHERE mode='live' AND asset=? AND tf=? AND as_of=? AND model_version=?",
+                               (asset, tf, res["as_of"], version))
+        if exists:
+            return
+        did = self.memory.record_decision(res, self.office.strategy)
+        res["decision_id"] = did
+        sec = TF_SECONDS[tf]
+        exp = self.expiry.get(tf, 3)
+        late = (not md.synthetic) and (time.time() - res["as_of"] > 0.35 * sec)
+        plan = binary.plan_trade(res, md.base, tf, exp, params.payout, self.office.strategy)
+        busy = self.memory.q("SELECT 1 FROM trades WHERE status='open' AND mode='live' AND asset=? AND tf=?", (asset, tf))
+        if plan and not busy and not late:
+            self.memory.open_trade(did, plan)
+            res["paper_trade"] = "aberta"
+        else:
+            if plan and late:
+                res["paper_trade"] = "não aberta: decisão tomada tarde demais em relação ao fechamento do candle"
+            # decisão sem operação também é avaliada (qualidade de "não operar")
+            self.memory.x("INSERT INTO trades(decision_id,run_id,mode,asset,tf,strategy,direction,entry_ts,expiry_ts,"
+                          "payout,stake,hour,confluence,confluence_class,process_quality,synthetic,status)"
+                          " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (did, self.memory.run_id, "live-shadow", asset, tf, self.office.strategy,
+                           res["lean"], res["as_of"], res["as_of"] + exp * sec, params.payout, 0,
+                           0, res["confluence"]["score"], res["confluence"]["classification"],
+                           res["process"]["score"], int(res["synthetic"]), "open"))
 
     def chart(self, md: MarketData, res: dict, bars: int = 160) -> dict:
         cs = md.base[-bars:]
@@ -120,38 +184,123 @@ class OfficeService:
         ov["fib"] = {k: v for k, v in fib.items() if v}
         return ov
 
-    def overview(self) -> list[dict]:
+    def overview(self, tf: Optional[str] = None) -> list[dict]:
+        tf = tf or self.base_tf
         out = []
         for a in ASSETS:
-            r = self.analyze(a)
+            r = self.analyze(a, tf)
             if "error" in r:
                 out.append({"asset": a, "label": asset_label(a), "error": r["error"]})
                 continue
             mtf = next((x for x in r["reports"] if x["agent"] == "MTF"), {})
             tmap = mtf.get("data", {}).get("map", {})
             cs = r["chart"]["candles"]
-            chg = (cs[-1][4] / cs[-97][4] - 1) * 100 if len(cs) > 97 else None
+            day = 86400 // TF_SECONDS[tf] + 1
+            chg = (cs[-1][4] / cs[-day][4] - 1) * 100 if len(cs) > day else None
             out.append({"asset": a, "label": asset_label(a), "price": r["price"], "change_24h": chg,
                         "decision": r["decision"], "confluence": r["confluence"]["score"],
                         "class": r["confluence"]["classification"], "lean": r["lean"],
-                        "trend": {tf: (tmap.get(tf) or {}).get("label") for tf in ("D1", "H4", "H1", "M15")},
+                        "trend": {t: (tmap.get(t) or {}).get("label") for t in ("D1", "H4", "H1", "M15", "M5", "M1")},
                         "as_of": r["as_of_label"], "synthetic": r["synthetic"]})
         return out
 
+    def scan(self, tf: Optional[str] = None) -> dict:
+        """Visão simultânea dos 8 pares (mini-gráfico, decisão, viés de cada agente, operação simulada)."""
+        tf = tf or self.base_tf
+        cards = []
+        open_trades = {(t["asset"], t["tf"]): dict(t) for t in
+                       self.memory.q("SELECT * FROM trades WHERE status='open' AND mode='live'")}
+        for a in ASSETS:
+            r = self.analyze(a, tf)
+            if "error" in r:
+                cards.append({"asset": a, "label": asset_label(a), "error": r["error"]})
+                continue
+            last = self.memory.q("SELECT result FROM trades WHERE mode='live' AND asset=? AND tf=? AND status='closed' "
+                                 "ORDER BY id DESC LIMIT 5", (a, tf))
+            ot = open_trades.get((a, tf))
+            cards.append({
+                "asset": a, "label": asset_label(a), "price": r["price"], "as_of": r["as_of_label"],
+                "decision": r["decision"], "reason": r["reason"], "lean": r["lean"],
+                "confluence": r["confluence"]["score"], "class": r["confluence"]["classification"],
+                "agreeing": r["confluence"]["agreeing_groups"], "news_avoid": r["news_avoid"],
+                "candles": r["chart"]["candles"][-70:],
+                "votes": [{"code": x["agent"], "bias": x["bias"], "conf": x["confidence"], "abstain": x["abstain"]}
+                          for x in r["reports"]],
+                "open_trade": {"direction": ot["direction"], "entry_ts": ot["entry_ts"], "expiry_ts": ot["expiry_ts"]} if ot else None,
+                "recent": [x["result"] for x in last],
+            })
+        return {"tf": tf, "expiry_bars": self.expiry.get(tf, 3), "cards": cards}
+
+    # ------------------------------------------------------------------ treino automático
+    def start_autopilot(self, interval: float = 5.0) -> None:
+        """Analisa todos os pares em todas as TFs ativas continuamente (operações apenas simuladas)."""
+        if self.autopilot["running"]:
+            return
+
+        def loop():
+            self.autopilot["running"] = True
+            while self.autopilot["running"]:
+                for tf in list(self.tfs):
+                    for a in ASSETS:
+                        try:
+                            self.analyze(a, tf)
+                        except Exception as e:  # pragma: no cover
+                            self.autopilot["errors"] = (self.autopilot["errors"] + [f"{a} {tf}: {e!r}"])[-10:]
+                self.autopilot["cycles"] += 1
+                self.autopilot["last"] = fmt_ts(int(time.time()))
+                time.sleep(interval)
+
+        threading.Thread(target=loop, daemon=True).start()
+
+    def settings(self, body: dict) -> dict:
+        for tf, n in (body.get("expiry") or {}).items():
+            if tf in TF_SECONDS and 1 <= int(n) <= 60:
+                self.expiry[tf] = int(n)
+        if body.get("tfs"):
+            self.tfs = [t for t in body["tfs"] if t in TF_SECONDS] or self.tfs
+        return {"tfs": self.tfs, "expiry": self.expiry}
+
+    # ------------------------------------------------------------------ MT5
+    def mt5_info(self) -> dict:
+        from .data.mt5_indicators import load_overrides, load_selection
+        p = self.provider
+        if p.name != "mt5":
+            return {"connected": False, "note": "O escritório não está conectado ao MetaTrader 5 (use INICIAR-MT5.bat)."}
+        store, _ = p.indicator_store(ASSETS[0])
+        stats = self.memory.agent_stats(mode="live")
+        per_ind = {k.split(":", 1)[1]: {"n": v["n"], "hit_rate": v["hit_rate"], "ci": v["ci"]}
+                   for k, v in stats.items() if k.startswith("MT5I:")}
+        return {"connected": True, "broker": p.broker, "available": p.list_indicators(), "selected": load_selection(),
+                "roles": load_overrides(), "exporter": store.status(), "exporter_install": p.exporter_note,
+                "symbols": {a: p.symbol(a) for a in ASSETS}, "stats": per_ind}
+
+    def mt5_select(self, names: list[str]) -> dict:
+        from .data.mt5_indicators import save_config, write_exporter_config
+        p = self.provider
+        if p.name != "mt5":
+            return {"error": "Não conectado ao MetaTrader 5."}
+        names = [n for n in names if n in set(p.list_indicators())]
+        save_config(names)
+        syms = [p.symbol(a) for a in ASSETS if p.symbol(a)]
+        write_exporter_config(p.export_dir, names, syms, sorted(set(self.tfs) | {"M1", "M5", "M15"},
+                                                                    key=lambda t: TF_SECONDS[t]))
+        return {"selected": names}
+
     # ------------------------------------------------------------------ simuladas
-    def resolve_pending(self, asset: str, md: MarketData) -> None:
+    def resolve_pending(self, asset: str, tf: str, md: MarketData) -> None:
         base = md.base
         open_ts = [c.ts for c in base]
         close_ts = [c.close_ts for c in base]
-        rows = self.memory.q("SELECT * FROM trades WHERE status='open' AND asset=? AND mode IN ('live','live-shadow')", (asset,))
+        rows = self.memory.q("SELECT * FROM trades WHERE status='open' AND asset=? AND tf=? AND mode IN ('live','live-shadow')",
+                             (asset, tf))
         for t in rows:
             if t["expiry_ts"] > base[-1].close_ts:
                 continue
             out = binary.settle(base, open_ts, close_ts, t["direction"] or 1, t["entry_ts"], t["expiry_ts"], t["payout"])
-            if out is None:
-                continue
             decision = self.memory.decision_payload(t["decision_id"])
-            if decision is None:
+            if out is None or decision is None:
+                if base[-1].close_ts - t["expiry_ts"] > 50 * TF_SECONDS[tf]:  # sem dados para resolver: descarta
+                    self.memory.x("UPDATE trades SET status='void' WHERE id=?", (t["id"],))
                 continue
             is_trade = t["mode"] == "live"
             rv = learning.review(self.memory, decision, t["decision_id"], t["id"] if is_trade else None, out, t["expiry_ts"])
@@ -162,11 +311,19 @@ class OfficeService:
                               (out["entry_price"], out["exit_price"], json.dumps(rv, ensure_ascii=False), t["id"]))
 
     def history(self) -> dict:
-        trades = self.memory.trades(200, mode="live")
+        trades = self.memory.trades(300, mode="live")
         closed = [t for t in trades if t["status"] == "closed"]
-        m = backtest.compute_metrics([{**t, "review": t["review"] or {}} for t in closed], self.memory, self.memory.active_version()[1].payout) if closed else None
+        m = backtest.compute_metrics([{**t, "review": t["review"] or {}} for t in closed], self.memory,
+                                     self.memory.active_version()[1].payout) if closed else None
         if m:
             m.pop("agents", None)
+            by_tf = {}
+            for t in closed:
+                d = by_tf.setdefault(t["tf"], {"n": 0, "wins": 0, "pnl": 0.0})
+                d["n"] += 1
+                d["wins"] += t["result"] == "WIN"
+                d["pnl"] = round(d["pnl"] + (t["pnl"] or 0), 2)
+            m["by_tf"] = by_tf
         return {"trades": trades, "metrics": m, "decisions": self.memory.decisions(60)}
 
     # ------------------------------------------------------------------ chat
@@ -183,12 +340,16 @@ class OfficeService:
                 if k in up and v:
                     asset = v
         H = "Head Trader"
+        tf = self.base_tf
+        m_tf = re.search(r"\b(M1|M5|M15|M30|H1)\b", up) or re.search(r"\b(1|5|15|30)\s*MIN", up)
+        if m_tf:
+            tf = m_tf.group(1) if m_tf.group(1).startswith(("M", "H")) else "M" + m_tf.group(1)
         if asset:
-            res = self.analyze(asset)
+            res = self.analyze(asset, tf)
             if "error" in res:
                 return {"reply": res["error"], "speaker": H, "transcript": []}
             c = res["confluence"]
-            reply = [f"Consultei os especialistas sobre {asset_label(asset)} (candles fechados até {res['as_of_label']}).",
+            reply = [f"Consultei os especialistas sobre {asset_label(asset)} em {tf} (candles fechados até {res['as_of_label']}).",
                      f"Decisão coletiva: {res['decision']} — {res['reason']}",
                      f"Confluência {c['classification']} ({c['score']}/100; {c['agreeing_groups']} grupos independentes confirmam). "
                      f"{c['calibration']['note']}",
@@ -240,11 +401,12 @@ class OfficeService:
 
     def run_backtest(self, cfg: dict, progress=None) -> dict:
         assets = [a for a in cfg.get("assets") or ASSETS if a in ASSETS]
-        datasets = {a: self.data(a) for a in assets}
+        tf = cfg.get("timeframe") or self.base_tf
+        datasets = {a: self.data(a, tf) for a in assets}
         datasets = {a: d for a, d in datasets.items() if d}
         version, params = self.memory.active_version()
         agents = cfg.get("agents") or None
-        bc = backtest.BTConfig(assets=list(datasets), timeframe=self.base_tf, strategy=cfg.get("strategy", "comite"),
+        bc = backtest.BTConfig(assets=list(datasets), timeframe=tf, strategy=cfg.get("strategy", "comite"),
                                agents=agents, expiry_bars=int(cfg.get("expiry_bars", 4)), step=int(cfg.get("step", 4)),
                                start_frac=float(cfg.get("start_frac", 0)), end_frac=float(cfg.get("end_frac", 1)),
                                payout=float(cfg["payout"]) if cfg.get("payout") else None,
@@ -258,9 +420,10 @@ class OfficeService:
 
     def learn(self, cfg: dict, progress=None) -> dict:
         assets = [a for a in cfg.get("assets") or ASSETS[:3] if a in ASSETS]
-        datasets = {a: self.data(a) for a in assets}
+        tf = cfg.get("timeframe") or self.base_tf
+        datasets = {a: self.data(a, tf) for a in assets}
         datasets = {a: d for a, d in datasets.items() if d}
-        rep = backtest.improvement_cycle(datasets, self.memory, self.news, split=float(cfg.get("split", 0.7)),
+        rep = backtest.improvement_cycle(datasets, self.memory, self.news, timeframe=tf, split=float(cfg.get("split", 0.7)),
                                          step=int(cfg.get("step", 6)), expiry_bars=int(cfg.get("expiry_bars", 4)),
                                          min_trades=int(cfg.get("min_trades", 30)),
                                          max_candidates=int(cfg.get("max_candidates", 4)), progress=progress)

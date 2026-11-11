@@ -58,7 +58,7 @@ def test_decision_is_valid(data):
     assert res["decision"] in DECISIONS
     assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
     assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
-    assert len(res["reports"]) == 10
+    assert len(res["reports"]) == 11
     assert res["transcript"][-1]["kind"] == "decision"
 
 
@@ -168,3 +168,64 @@ def test_mt5_provider_with_fake_terminal(monkeypatch):
     assert "MetaTrader 5" in s.source and "Corretora-Demo" in s.source and not s.synthetic
     md = MarketData.load(p, "EURUSD", "M15")
     assert md.base[-1].close_ts <= now  # candle em formação descartado
+
+
+def test_mt5_user_indicators_flow(monkeypatch, tmp_path):
+    """Exportador do MT5 simulado: lista indicadores, grava config, lê setas e detecta repaint."""
+    import sys
+    import time
+    import types
+    import numpy as np
+    from tio.data import mt5_indicators as mi
+    now = int(time.time())
+    sec = 900
+    last_open = (now - now % sec) - sec            # última vela M15 fechada
+    start = last_open - sec * 799
+    rng = np.random.default_rng(1)
+    closes = 1.1 + np.cumsum(rng.normal(0, 0.0004, 800))
+    rows = np.array([(start + i * sec, closes[i] - 0.0001, closes[i] + 0.0006, closes[i] - 0.0006, closes[i], 50, 0, 0)
+                     for i in range(800)] + [(last_open + sec, closes[-1], closes[-1], closes[-1], closes[-1], 1, 0, 0)],
+                    dtype=[("time", "i8"), ("open", "f8"), ("high", "f8"), ("low", "f8"), ("close", "f8"),
+                           ("tick_volume", "i8"), ("spread", "i4"), ("real_volume", "i8")])
+    data_dir, common = tmp_path / "data", tmp_path / "common"
+    (data_dir / "MQL5" / "Indicators" / "Setas").mkdir(parents=True)
+    (data_dir / "MQL5" / "Indicators" / "Setas" / "Sinal.ex5").write_bytes(b"x")
+    fake = types.SimpleNamespace(
+        TIMEFRAME_M1=1, TIMEFRAME_M5=5, TIMEFRAME_M15=15, TIMEFRAME_M30=30, TIMEFRAME_H1=60, TIMEFRAME_H4=240,
+        TIMEFRAME_D1=1440, TIMEFRAME_W1=10080, TIMEFRAME_MN1=43200,
+        initialize=lambda: True, last_error=lambda: None,
+        account_info=lambda: types.SimpleNamespace(server="Demo"),
+        terminal_info=lambda: types.SimpleNamespace(company="X", data_path=str(data_dir), commondata_path=str(common),
+                                                    path=str(tmp_path)),
+        symbol_info=lambda s: object() if s == "EURUSD" else None, symbols_get=lambda: [], symbol_select=lambda s, v: True,
+        symbol_info_tick=lambda s: types.SimpleNamespace(time=now),
+        copy_rates_from_pos=lambda s, tf, a, n: rows if tf == 15 else None,
+    )
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    monkeypatch.setattr(mi, "CONFIG_PATH", tmp_path / "cfg.json")
+    from tio.data.providers import MT5Provider
+    from tio.service import OfficeService
+    p = MT5Provider()
+    assert (data_dir / "MQL5" / "Experts" / "TIO_Exportador.mq5").exists()   # exportador instalado
+    assert p.list_indicators() == ["Setas\\Sinal"]
+    svc = OfficeService(provider=p, memory=Memory(":memory:"))
+    svc.mt5_select(["Setas\\Sinal", "inexistente"])
+    cfg = (common / "Files" / "TIO" / "config.txt").read_text()
+    assert "indicators=Setas\\Sinal\n" in cfg and "symbols=EURUSD" in cfg
+    # exportação: buffer 0 = seta abaixo da mínima (compra) esparsa, buffer 1 = média (linha)
+    lines = ["time,b0,b1"]
+    for i, r in enumerate(rows[:-1]):
+        arrow = f"{r['low'] - 0.0003:.5f}" if i % 7 == 0 or r["time"] == last_open else ""
+        lines.append(f"{r['time']},{arrow},{r['close'] - 0.0002:.5f}")
+    d = common / "Files" / "TIO"
+    (d / "Setas_Sinal_EURUSD_M15.csv").write_text("\n".join(lines))
+    # registro ao vivo divergente em 6 de 20 barras => indicador redesenha
+    live = ["time,b0,b1"] + [f"{r['time']},{'' if i % 7 == 0 else '1.0'},1.1" for i, r in enumerate(rows[-21:-1])]
+    (d / "live_Setas_Sinal_EURUSD_M15.csv").write_text("\n".join(live))
+    res = svc.analyze("EURUSD", "M15")
+    rep = next(r for r in res["reports"] if r["agent"] == "MT5I")
+    assert not rep["abstain"]
+    info = rep["data"]["indicators"]["Setas_Sinal"]
+    assert info["roles"]["0"] == "seta de COMPRA" and info["roles"]["1"] == "linha de preço"
+    assert any(e["kind"] == "user_line" for e in rep["evidence"])
+    assert any("REDESENHA" in w for w in rep["warnings"])

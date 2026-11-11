@@ -78,6 +78,7 @@ def resample(candles: list[Candle], tf: str, as_of: Optional[int] = None) -> lis
 class Provider:
     name = "base"
     synthetic = False
+    native_multi_tf = False  # True: cada temporalidade vem da própria fonte (não reamostrada)
 
     def load(self, asset: str, tf: str) -> Optional[Series]:  # pragma: no cover
         raise NotImplementedError
@@ -89,6 +90,7 @@ class CSVProvider(Provider):
     Metadados opcionais em {ASSET}_{TF}.meta.json: {"source": ..., "volume_kind": ...}.
     """
     name = "csv"
+    native_multi_tf = True
 
     def __init__(self, directory: Path | str | None = None):
         self.dir = Path(directory) if directory else DATA_DIR / "market"
@@ -198,6 +200,7 @@ class MT5Provider(Provider):
     convertidos para UTC. Volume = tick volume da corretora.
     """
     name = "mt5"
+    native_multi_tf = True
 
     def __init__(self):
         try:
@@ -215,6 +218,58 @@ class MT5Provider(Provider):
         self.broker = (info.server if info else None) or (term.company if term else "MetaTrader 5")
         self._symbols: dict[str, Optional[str]] = {}
         self._offset: Optional[int] = None
+        self.data_path = Path(term.data_path) if term and getattr(term, "data_path", None) else None
+        self.common_path = Path(term.commondata_path) if term and getattr(term, "commondata_path", None) else None
+        self.install_path = Path(term.path) if term and getattr(term, "path", None) else None
+        self.exporter_note = self.install_exporter()
+
+    # ------------------------------------------------------------ indicadores do usuário
+    @property
+    def export_dir(self) -> Optional[Path]:
+        env = os.environ.get("TIO_MT5_FILES")
+        if env:
+            return Path(env)
+        return self.common_path / "Files" / "TIO" if self.common_path else None
+
+    def list_indicators(self) -> list[str]:
+        """Indicadores compilados (.ex5) da pasta MQL5/Indicators, no formato aceito pelo iCustom."""
+        if not self.data_path:
+            return []
+        root = self.data_path / "MQL5" / "Indicators"
+        out = []
+        for p in sorted(root.rglob("*.ex5")):
+            rel = p.relative_to(root).with_suffix("")
+            out.append("\\".join(rel.parts))
+        return out
+
+    def install_exporter(self) -> str:
+        """Copia o EA exportador para MQL5/Experts e tenta compilá-lo com o MetaEditor."""
+        import shutil
+        import subprocess
+        src = Path(__file__).resolve().parents[2] / "mql5" / "TIO_Exportador.mq5"
+        if not self.data_path or not src.exists():
+            return "Pasta de dados do MT5 não encontrada."
+        dst_dir = self.data_path / "MQL5" / "Experts"
+        dst = dst_dir / src.name
+        try:
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            if not dst.exists() or dst.read_bytes() != src.read_bytes():
+                shutil.copyfile(src, dst)
+            ex5 = dst.with_suffix(".ex5")
+            if ex5.exists() and ex5.stat().st_mtime >= dst.stat().st_mtime:
+                return "Exportador instalado e compilado."
+            editor = self.install_path / "metaeditor64.exe" if self.install_path else None
+            if editor and editor.exists():
+                subprocess.run([str(editor), f"/compile:{dst}", "/log"], timeout=90, check=False)
+            return ("Exportador instalado e compilado." if ex5.exists() else
+                    "Exportador copiado; abra-o no MetaEditor e aperte F7 para compilar.")
+        except Exception as e:  # pragma: no cover - depende do Windows
+            return f"Não foi possível instalar o exportador automaticamente: {e}"
+
+    def indicator_store(self, asset: str):
+        from .mt5_indicators import IndicatorStore
+        sym = self.symbol(asset)
+        return IndicatorStore(self.export_dir, self.server_offset(sym) if sym else 0), sym
 
     def symbol(self, asset: str) -> Optional[str]:
         """Encontra o nome do ativo na corretora (ex.: EURUSD, EURUSDm, EURUSD.r)."""

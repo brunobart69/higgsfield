@@ -17,6 +17,26 @@ analisam individualmente, debatem, contestam uns aos outros e chegam a uma decis
 O programa **só lê** os candles do MT5 (nenhuma ordem é enviada). Os horários da corretora são convertidos para UTC e o
 volume usado é o tick volume. O ativo é localizado mesmo com sufixo da corretora (ex.: `EURUSDm`, `EURUSD.r`).
 
+### Multi-Pares, M1/M5 e treino automático
+
+* A aba **Multi-Pares** mostra os 8 pares ao mesmo tempo, com mini-gráfico, decisão, viés de cada agente e a operação
+  simulada em andamento. O seletor **M1 / M5 / M15** no topo troca a temporalidade de todas as telas.
+* Com `serve --auto` (já ligado no `INICIAR-MT5.bat`), o escritório analisa todos os pares em todas as temporalidades
+  a cada poucos segundos e registra operações **apenas simuladas** (expiração padrão: 3 velas em M1/M5, 4 em M15).
+  Decisões que chegam tarde demais em relação ao fechamento da vela não abrem simulação.
+
+### Seus indicadores do MT5 (Agente 13)
+
+1. Ao conectar, o escritório copia e compila o Expert Advisor `mql5/TIO_Exportador.mq5` na sua pasta do MT5.
+   Ele **não envia ordens**; só copia os valores dos indicadores escolhidos para `Files\TIO` na pasta comum do MT5.
+2. Arraste o **TIO_Exportador** para qualquer gráfico (Navegador → Expert Advisors).
+3. Na aba **MT5** do painel, marque seus indicadores e clique em **Salvar escolha**.
+
+O Agente 13 deduz o papel de cada buffer (seta de compra, seta de venda, linha de preço, oscilador), usa somente velas
+fechadas, detecta indicadores que **redesenham** (repaint) e mede a taxa de acerto de cada indicador em separado.
+Papéis podem ser corrigidos em `data/mt5_indicators.json` (`{"roles": {"Nome": {"0": "compra", "1": "venda"}}}`).
+Os indicadores são carregados com os parâmetros padrão.
+
 ## Início rápido
 
 Requer apenas Python ≥ 3.10 (biblioteca padrão, sem dependências). `pytest` é necessário somente para os testes.

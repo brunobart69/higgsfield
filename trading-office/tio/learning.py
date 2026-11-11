@@ -31,6 +31,10 @@ def review(memory, decision: dict, decision_id: int, trade_id: Optional[int], ou
             correct = int(r["bias"] == actual)
         memory.record_agent_outcome(decision_id, trade_id or 0, r["agent"], decision["asset"], r["bias"],
                                     r["confidence"], correct, available_at)
+        if r["agent"] == "MT5I" and actual:
+            for ind_name, d in (r["data"].get("signals") or {}).items():  # desempenho por indicador do usuário
+                memory.record_agent_outcome(decision_id, trade_id or 0, f"MT5I:{ind_name}", decision["asset"], d,
+                                            0.5, int(d == actual), available_at)
         if correct is None:
             continue
         (right if correct else wrong).append(r["name"])

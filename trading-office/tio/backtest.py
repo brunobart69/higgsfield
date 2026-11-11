@@ -204,9 +204,9 @@ def compute_metrics(trades: list[dict], mem: Memory, payout: float) -> dict:
 # --------------------------------------------------------------------------- #
 def improvement_cycle(datasets: dict[str, MarketData], memory: Memory, news: Optional[NewsStore] = None,
                       split: float = 0.7, step: int = 6, expiry_bars: int = 4, min_trades: int = 30,
-                      max_candidates: int = 4, progress=None) -> dict:
+                      max_candidates: int = 4, progress=None, timeframe: str = "M15") -> dict:
     version, params = memory.active_version()
-    base_cfg = dict(assets=list(datasets), step=step, expiry_bars=expiry_bars)
+    base_cfg = dict(assets=list(datasets), step=step, expiry_bars=expiry_bars, timeframe=timeframe)
     ins_cfg = BTConfig(**base_cfg, start_frac=0.0, end_frac=split)
     oos_cfg = BTConfig(**base_cfg, start_frac=split, end_frac=1.0)
     log = []
@@ -275,7 +275,7 @@ def improvement_cycle(datasets: dict[str, MarketData], memory: Memory, news: Opt
                            _summ(base_in), _summ(base_out))
     report = {"baseline_version": version, "baseline_in": _summ(base_in), "baseline_out": _summ(base_out),
               "candidates": results, "promoted": accepted[1]["version"] if accepted else None,
-              "synthetic": base_in["synthetic"], "split": split,
+              "synthetic": base_in["synthetic"], "split": split, "timeframe": timeframe,
               "note": "Melhorias só são incorporadas se superarem a versão ativa FORA da amostra."}
     memory.add_report("evolucao", f"Ciclo de aprendizado sobre {version}", report)
     return report

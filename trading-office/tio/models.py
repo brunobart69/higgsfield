@@ -130,6 +130,7 @@ GROUPS = {
     "liquidity": "Liquidez",
     "macro": "Contexto econômico",
     "reversal": "Exaustão / reversão",
+    "mt5": "Indicadores do usuário (MT5)",
 }
 
 

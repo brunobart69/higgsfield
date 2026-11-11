@@ -11,12 +11,14 @@ from .models import ASSETS, DIR_LABEL, asset_label
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="tio", description="AI Trading Intelligence Office (educacional)")
     ap.add_argument("--provider", help="mt5 | csv | twelvedata | yahoo | synthetic | auto (padrão)")
-    ap.add_argument("--tf", default="M15", help="temporalidade base (padrão M15)")
+    ap.add_argument("--tf", default="M15", help="temporalidade principal (padrão M15)")
+    ap.add_argument("--tfs", help="temporalidades acompanhadas, ex.: M1,M5,M15")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="inicia dashboard e API")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--auto", action="store_true", help="treino automático: analisa todos os pares continuamente")
 
     a = sub.add_parser("analyze", help="reunião do escritório sobre um ativo")
     a.add_argument("asset")
@@ -25,6 +27,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("backtest", help="laboratório de backtesting")
     b.add_argument("--assets", default="EURUSD")
     b.add_argument("--strategy", default="comite")
+    b.add_argument("--timeframe", help="M1, M5, M15...")
     b.add_argument("--agents", help="lista de agentes (ex.: PA,LIQ,MTF)")
     b.add_argument("--expiry", type=int, default=4, help="expiração em candles")
     b.add_argument("--step", type=int, default=4)
@@ -73,10 +76,11 @@ def main(argv=None) -> int:
             print("Nenhum evento carregado.")
         return 0
 
-    svc = OfficeService(provider=get_provider(args.provider), base_tf=args.tf.upper())
+    tfs = [t.strip().upper() for t in args.tfs.split(",")] if args.tfs else None
+    svc = OfficeService(provider=get_provider(args.provider), base_tf=args.tf.upper(), tfs=tfs)
     if args.cmd == "serve":
         from .server import serve
-        serve(args.host, args.port, svc)
+        serve(args.host, args.port, svc, autopilot=args.auto)
         return 0
     if args.cmd == "analyze":
         res = svc.analyze(args.asset.upper().replace("/", ""))
@@ -100,7 +104,8 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "backtest":
         cfg = {"assets": [x.strip().upper() for x in args.assets.split(",")], "strategy": args.strategy,
-               "agents": args.agents.split(",") if args.agents else None, "expiry_bars": args.expiry, "step": args.step,
+               "agents": args.agents.split(",") if args.agents else None, "expiry_bars": args.expiry,
+               "timeframe": args.timeframe, "step": args.step,
                "payout": args.payout}
         m = svc.run_backtest(cfg, progress=lambda n: print(f"  ... {n} passos", file=sys.stderr))
         print(json.dumps({k: v for k, v in m.items() if k not in ("trades", "equity")}, ensure_ascii=False, indent=1, default=str))

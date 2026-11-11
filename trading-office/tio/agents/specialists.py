@@ -4,7 +4,7 @@ from __future__ import annotations
 from .. import indicators as ind
 from ..context import MarketContext
 from ..data.news import IMPACT_PT, IMPACT_RANK
-from ..models import BEAR, BULL, NEUTRAL, DIR_LABEL, TIMEFRAMES, TF_LABEL, AgentReport, fmt_ts
+from ..models import BEAR, BULL, NEUTRAL, DIR_LABEL, TIMEFRAMES, TF_LABEL, TF_SECONDS, AgentReport, fmt_ts
 from .base import Agent
 
 
@@ -654,5 +654,71 @@ class LiquidityHunterAgent(Agent):
         return rep
 
 
+# =========================================================================== 13
+class UserIndicatorsAgent(Agent):
+    code, number, name, group = "MT5I", 13, "Indicadores MT5", "mt5"
+    specialty = "Lê os indicadores do próprio usuário no MetaTrader 5 e mede se eles acertam"
+    personality = "Neutro e auditável: trata cada indicador como hipótese até o histórico provar valor."
+    methodology = ("Usa somente barras FECHADAS exportadas pelo TIO_Exportador. Setas de compra/venda na última barra "
+                   "fechada viram evidência; linhas de preço indicam lado. Detecta indicadores que redesenham (repaint) "
+                   "comparando o registro ao vivo com o histórico. Peso baixo até a validação estatística.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        from ..data.mt5_indicators import ROLE_PT, classify
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        exports = {k: v for k, v in (ctx.data.indicators or {}).items() if k[1] == tf}
+        if not exports:
+            rep.abstain = True
+            rep.summary = (f"Nenhum indicador do MT5 exportado para {tf}. Escolha seus indicadores na aba MT5 "
+                           "e coloque o TIO_Exportador em um gráfico.")
+            return rep
+        sec = TF_SECONDS[tf]
+        cs = ctx.candles(tf) or []
+        by_ts = {c.ts: c for c in cs}
+        rep.data["indicators"] = {}
+        rep.data["signals"] = {}
+        for (name, _), exp in sorted(exports.items()):
+            rows = [r for r in exp.rows if r[0] + sec <= ctx.as_of]
+            if not exp.roles:
+                exp.roles = classify(exp.rows[-400:], by_ts)
+            info = {"roles": {str(b): ROLE_PT.get(r, r) for b, r in exp.roles.items()}, "auto": exp.auto, "bars": len(rows)}
+            rep.data["indicators"][name] = info
+            if not rows:
+                continue
+            last_ts, vals = rows[-1]
+            if last_ts + sec != ctx.as_of:
+                info["note"] = "exportação atrasada em relação ao gráfico"
+                rep.warnings.append(f"{name}: última barra exportada não é a última fechada (exportador parado?).")
+                continue
+            live_vals = exp.live.get(last_ts)
+            use = live_vals if live_vals is not None else vals
+            rp = exp.repaint()
+            q = 0.5
+            if rp:
+                info["repaint"] = rp
+                if rp["rate"] > 0.1:
+                    q = 0.25
+                    rep.warnings.append(f"{name} REDESENHA: {rp['changed']} de {rp['checked']} sinais mudaram depois do "
+                                        "fechamento. Backtests com ele ficam otimistas.")
+            tag = " (papéis deduzidos automaticamente)" if exp.auto else ""
+            for b, role in exp.roles.items():
+                v = use[b] if b < len(use) else None
+                if role in ("compra", "venda") and v is not None:
+                    d = BULL if role == "compra" else BEAR
+                    rep.data["signals"][name] = d
+                    self.ev(rep, "user_arrow", f"{name}: {ROLE_PT[role]} na barra fechada {fmt_ts(last_ts)}{tag}",
+                            d, 0.5, q, tf)
+                elif role == "linha" and v is not None and cs:
+                    d = BULL if cs[-1].close > v else BEAR
+                    self.ev(rep, "user_line", f"{name} (buffer {b}): preço {'acima' if d == BULL else 'abaixo'} da linha {_fmt(v)}",
+                            d, 0.25, q, tf)
+                elif role == "oscilador" and v is not None:
+                    info.setdefault("values", {})[str(b)] = round(v, 4)
+        if not rep.evidence and not rep.abstain:
+            rep.summary = "Indicadores do MT5 lidos: nenhum sinal na última barra fechada."
+        return rep
+
+
 SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
-               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent]
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent]

@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .models import ASSETS
+from .models import ASSETS, TF_SECONDS
 from .service import OfficeService
 
 WEB = Path(__file__).resolve().parent / "web"
@@ -42,13 +42,18 @@ def make_handler(svc: OfficeService):
                     return self._json(svc.status())
                 if u.path == "/api/agents":
                     return self._json(svc.agents_catalog())
+                tf = q.get("tf") if q.get("tf") in TF_SECONDS else None
                 if u.path == "/api/overview":
-                    return self._json(svc.overview())
+                    return self._json(svc.overview(tf))
+                if u.path == "/api/scan":
+                    return self._json(svc.scan(tf))
+                if u.path == "/api/mt5":
+                    return self._json(svc.mt5_info())
                 if u.path == "/api/analysis":
                     asset = q.get("asset", "EURUSD").upper()
                     if asset not in ASSETS:
                         return self._json({"error": "ativo não monitorado"}, 400)
-                    return self._json(svc.analyze(asset))
+                    return self._json(svc.analyze(asset, tf))
                 if u.path == "/api/history":
                     return self._json(svc.history())
                 if u.path == "/api/news":
@@ -73,6 +78,10 @@ def make_handler(svc: OfficeService):
                     return self._json({"job": svc.start_job("backtest", lambda pr: svc.run_backtest(body, pr))})
                 if u.path == "/api/learn":
                     return self._json({"job": svc.start_job("learn", lambda pr: svc.learn(body, pr))})
+                if u.path == "/api/mt5/indicators":
+                    return self._json(svc.mt5_select(body.get("names") or []))
+                if u.path == "/api/settings":
+                    return self._json(svc.settings(body))
                 if u.path == "/api/news/reload":
                     svc.news.reload()
                     svc._analysis.clear()
@@ -100,9 +109,12 @@ def make_handler(svc: OfficeService):
     return H
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, svc: OfficeService | None = None) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8765, svc: OfficeService | None = None, autopilot: bool = False) -> None:
     svc = svc or OfficeService()
     st = svc.status()
+    if autopilot:
+        svc.start_autopilot()
+        print(f"Treino automático ligado: {len(st['assets'])} pares × {', '.join(svc.tfs)} (operações apenas simuladas)")
     print(f"AI Trading Intelligence Office em http://{host}:{port}")
     print(f"Fonte de dados: {st['source']}{'  [SINTÉTICO — não é mercado real]' if st['synthetic'] else ''}")
     ThreadingHTTPServer((host, port), make_handler(svc)).serve_forever()
