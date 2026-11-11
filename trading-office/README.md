@@ -6,6 +6,17 @@ analisam individualmente, debatem, contestam uns aos outros e chegam a uma decis
 > **Uso educacional.** O sistema não executa operações com dinheiro real (trava em `tio/binary.py`), não promete lucros,
 > não inventa dados de mercado e não apresenta pontuação de confluência como probabilidade de acerto.
 
+## Usar com o MetaTrader 5 (Windows) — passo a passo
+
+1. Instale o Python em https://www.python.org/downloads/ e, na primeira tela da instalação, marque **“Add python.exe to PATH”**.
+2. Baixe este projeto: no GitHub, botão verde **Code → Download ZIP**, e extraia a pasta.
+3. Abra o **MetaTrader 5** e faça login (conta demo serve).
+4. Dentro da pasta `trading-office`, dê **dois cliques em `INICIAR-MT5.bat`**.
+5. O navegador abre em http://127.0.0.1:8765 com os dados da sua corretora.
+
+O programa **só lê** os candles do MT5 (nenhuma ordem é enviada). Os horários da corretora são convertidos para UTC e o
+volume usado é o tick volume. O ativo é localizado mesmo com sufixo da corretora (ex.: `EURUSDm`, `EURUSD.r`).
+
 ## Início rápido
 
 Requer apenas Python ≥ 3.10 (biblioteca padrão, sem dependências). `pytest` é necessário somente para os testes.
@@ -23,6 +34,7 @@ python -m pytest -q tests
 
 | Fonte | Como usar | Observação |
 |---|---|---|
+| MetaTrader 5 | `pip install MetaTrader5` e `python -m tio --provider mt5 serve` com o MT5 aberto (Windows) | tick volume da corretora; somente leitura |
 | CSV local | `data/market/{ATIVO}_{TF}.csv` com `timestamp,open,high,low,close[,volume]` (UTC) | `{ATIVO}_{TF}.meta.json` opcional com `source` |
 | Twelve Data | `export TWELVEDATA_API_KEY=...` e `python -m tio fetch --source twelvedata --tfs M15` | grava CSV + metadados com a origem |
 | Yahoo Finance | `python -m tio fetch --source yahoo --tfs M15` | forex sem volume |

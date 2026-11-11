@@ -10,7 +10,7 @@ from .models import ASSETS, DIR_LABEL, asset_label
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="tio", description="AI Trading Intelligence Office (educacional)")
-    ap.add_argument("--provider", help="csv | twelvedata | yahoo | synthetic | auto (padrão)")
+    ap.add_argument("--provider", help="mt5 | csv | twelvedata | yahoo | synthetic | auto (padrão)")
     ap.add_argument("--tf", default="M15", help="temporalidade base (padrão M15)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

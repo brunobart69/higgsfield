@@ -190,6 +190,71 @@ class YahooProvider(Provider):
         return Series(asset, tf, candles, "Yahoo Finance (query1.finance.yahoo.com)", volume_kind="none")
 
 
+class MT5Provider(Provider):
+    """Lê candles do terminal MetaTrader 5 aberto no mesmo computador (Windows).
+
+    SOMENTE LEITURA: usa apenas copy_rates_from_pos / symbol_info. Nenhuma
+    função de envio de ordens é chamada. Horários do servidor da corretora são
+    convertidos para UTC. Volume = tick volume da corretora.
+    """
+    name = "mt5"
+
+    def __init__(self):
+        try:
+            import MetaTrader5 as mt5  # type: ignore
+        except ImportError as e:
+            raise RuntimeError("Pacote MetaTrader5 não instalado (pip install MetaTrader5; só funciona no Windows).") from e
+        self.mt5 = mt5
+        if not mt5.initialize():
+            raise RuntimeError(f"Não consegui conectar ao MetaTrader 5 aberto: {mt5.last_error()}")
+        self.TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
+                   "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1, "W1": mt5.TIMEFRAME_W1,
+                   "MN": mt5.TIMEFRAME_MN1}
+        info = mt5.account_info()
+        term = mt5.terminal_info()
+        self.broker = (info.server if info else None) or (term.company if term else "MetaTrader 5")
+        self._symbols: dict[str, Optional[str]] = {}
+        self._offset: Optional[int] = None
+
+    def symbol(self, asset: str) -> Optional[str]:
+        """Encontra o nome do ativo na corretora (ex.: EURUSD, EURUSDm, EURUSD.r)."""
+        if asset not in self._symbols:
+            found = None
+            if self.mt5.symbol_info(asset) is not None:
+                found = asset
+            else:
+                for s in self.mt5.symbols_get() or []:
+                    if s.name.upper().startswith(asset) and len(s.name) <= len(asset) + 4:
+                        found = s.name
+                        break
+            if found:
+                self.mt5.symbol_select(found, True)
+            self._symbols[asset] = found
+        return self._symbols[asset]
+
+    def server_offset(self, sym: str) -> int:
+        """Diferença (s) entre o horário do servidor da corretora e UTC, arredondada à meia hora."""
+        if self._offset is None:
+            tick = self.mt5.symbol_info_tick(sym)
+            now = dt.datetime.now(dt.timezone.utc).timestamp()
+            self._offset = int(round((tick.time - now) / 1800) * 1800) if tick and abs(tick.time - now) < 15 * 3600 else 0
+        return self._offset
+
+    def load(self, asset: str, tf: str, count: int = 6000) -> Optional[Series]:
+        sym = self.symbol(asset)
+        if sym is None or tf not in self.TF:
+            return None
+        rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, count)
+        if rates is None or len(rates) == 0:
+            return None
+        off = self.server_offset(sym)
+        candles = [Candle(int(r["time"]) - off, float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]),
+                          float(r["tick_volume"])) for r in rates]
+        candles = finalize(candles, tf)
+        src = f"MetaTrader 5 · {self.broker} · {sym} (horário convertido para UTC, offset {off // 3600:+d}h)"
+        return Series(asset, tf, candles, src, volume_kind="tick")
+
+
 # --------------------------------------------------------------------------- #
 BASE_PRICE = {"EURUSD": 1.085, "EURJPY": 162.0, "EURGBP": 0.855, "GBPJPY": 190.0, "USDJPY": 150.0,
               "USDCAD": 1.36, "AUDJPY": 98.0, "CHFJPY": 170.0}
@@ -264,6 +329,8 @@ def get_provider(name: Optional[str] = None) -> Provider:
         return YahooProvider()
     if name == "synthetic":
         return SyntheticProvider()
+    if name == "mt5":
+        return MT5Provider()
     # auto: CSV se houver arquivos, senão sintético (explicitamente sinalizado)
     csvp = CSVProvider()
     if csvp.available():
@@ -271,5 +338,5 @@ def get_provider(name: Optional[str] = None) -> Provider:
     return SyntheticProvider()
 
 
-__all__ = ["ASSETS", "CSVProvider", "TwelveDataProvider", "YahooProvider", "SyntheticProvider",
+__all__ = ["ASSETS", "CSVProvider", "MT5Provider", "TwelveDataProvider", "YahooProvider", "SyntheticProvider",
            "get_provider", "resample", "closed_only", "save_csv"]

@@ -133,3 +133,38 @@ def test_csv_roundtrip(tmp_path, data):
     save_csv(s, tmp_path)
     back = CSVProvider(tmp_path).load("EURUSD", "M15")
     assert len(back) == 100 and back.source == "teste" and back.candles[5].close == pytest.approx(s.candles[5].close)
+
+
+def test_mt5_provider_with_fake_terminal(monkeypatch):
+    """Simula o pacote MetaTrader5: converte horário do servidor para UTC e só lê dados."""
+    import sys
+    import time
+    import types
+    import numpy as np
+    now = int(time.time())
+    off = 2 * 3600  # servidor da corretora em UTC+2
+    start = (now - now % 900) - 900 * 600
+    rows = np.array([(start + i * 900 + off, 1.1, 1.101, 1.099, 1.1005, 50, 0, 0) for i in range(600)],
+                    dtype=[("time", "i8"), ("open", "f8"), ("high", "f8"), ("low", "f8"), ("close", "f8"),
+                           ("tick_volume", "i8"), ("spread", "i4"), ("real_volume", "i8")])
+    calls = []
+    fake = types.SimpleNamespace(
+        TIMEFRAME_M1=1, TIMEFRAME_M5=5, TIMEFRAME_M15=15, TIMEFRAME_M30=30, TIMEFRAME_H1=60, TIMEFRAME_H4=240,
+        TIMEFRAME_D1=1440, TIMEFRAME_W1=10080, TIMEFRAME_MN1=43200,
+        initialize=lambda: True, last_error=lambda: None,
+        account_info=lambda: types.SimpleNamespace(server="Corretora-Demo"), terminal_info=lambda: None,
+        symbol_info=lambda s: None, symbols_get=lambda: [types.SimpleNamespace(name="EURUSDm")],
+        symbol_select=lambda s, v: True,
+        symbol_info_tick=lambda s: types.SimpleNamespace(time=now + off),
+        copy_rates_from_pos=lambda s, tf, a, n: (calls.append(s), rows)[1],
+        order_send=lambda *a: (_ for _ in ()).throw(AssertionError("ordem enviada!")),
+    )
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    from tio.data.providers import MT5Provider
+    p = MT5Provider()
+    s = p.load("EURUSD", "M15")
+    assert calls == ["EURUSDm"]
+    assert s.candles[0].ts == start and s.volume_kind == "tick"
+    assert "MetaTrader 5" in s.source and "Corretora-Demo" in s.source and not s.synthetic
+    md = MarketData.load(p, "EURUSD", "M15")
+    assert md.base[-1].close_ts <= now  # candle em formação descartado

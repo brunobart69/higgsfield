@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from . import indicators as ind
 from .data.news import NewsStore
-from .data.providers import Provider, resample
+from .data.providers import Provider, closed_only, resample
 from .models import TIMEFRAMES, TF_SECONDS, Candle, Series
 
 WINDOW = {"Y1": 30, "MN": 120, "W1": 260, "D1": 400, "H4": 400, "H1": 400, "M30": 400, "M15": 400, "M5": 400, "M1": 400}
@@ -41,6 +41,8 @@ class MarketData:
     @classmethod
     def load(cls, provider: Provider, asset: str, base_tf: str = "M15", extra_tfs: tuple[str, ...] = ()) -> Optional["MarketData"]:
         base = provider.load(asset, base_tf)
+        if base is not None:
+            base.candles = closed_only(base.candles)  # descarta o candle ainda em formação
         if base is None or len(base) == 0:
             return None
         extra = {}
