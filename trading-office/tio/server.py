@@ -80,6 +80,8 @@ def make_handler(svc: OfficeService):
                     return self._json({"job": svc.start_job("learn", lambda pr: svc.learn(body, pr))})
                 if u.path == "/api/mt5/indicators":
                     return self._json(svc.mt5_select(body.get("names") or []))
+                if u.path == "/api/mt5/open":
+                    return self._json(svc.mt5_open(body.get("what", "editor")))
                 if u.path == "/api/settings":
                     return self._json(svc.settings(body))
                 if u.path == "/api/news/reload":

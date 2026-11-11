@@ -372,6 +372,13 @@ async function loadMT5() {
   $("#mt5-list").innerHTML = m.available.length
     ? m.available.map((n) => `<label><input type="checkbox" value="${esc(n)}" ${sel.has(n) ? "checked" : ""}>${esc(n)}</label>`).join("")
     : `<p class="muted small">Nenhum indicador compilado (.ex5) encontrado na pasta de indicadores do seu MT5.</p>`;
+  const f = m.exporter_file || {};
+  $("#mt5-file").innerHTML = `<p><span class="ok-dot ${f.compiled ? "on" : ""}"></span>Arquivo do exportador: ${f.copied ? "copiado" : "<b class='down'>não copiado</b>"} · ${f.compiled ? "<b class='up'>compilado</b>" : "<b class='down'>não compilado</b>"}</p>
+    <p class="muted">Pasta: <span class="mono">${esc(f.folder || "—")}</span></p>
+    <p><button class="primary" id="mt5-open-ed">Abrir no MetaEditor</button> <button class="ghost" id="mt5-open-dir">Abrir pasta</button> <span id="mt5-open-msg" class="muted"></span></p>
+    ${f.compile_log ? `<details><summary>Registro da compilação</summary><pre>${esc(f.compile_log)}</pre></details>` : ""}`;
+  const openIt = async (what) => { const r = await post("/api/mt5/open", { what }); $("#mt5-open-msg").textContent = r.message || r.error || ""; setTimeout(loadMT5, 8000); };
+  $("#mt5-open-ed").onclick = () => openIt("editor"); $("#mt5-open-dir").onclick = () => openIt("folder");
   const ex = m.exporter || {};
   $("#mt5-exp").innerHTML = `<p class="small"><span class="ok-dot ${ex.running ? "on" : ""}"></span>${ex.running ? "Exportador funcionando" : "Exportador ainda não está rodando"} · ${esc(m.exporter_install || "")}</p>
     ${ex.status_text ? `<pre>${esc(ex.status_text)}</pre>` : ""}${ex.files && ex.files.length ? `<p class="small muted">${ex.files.length} arquivos exportados</p>` : ""}`;

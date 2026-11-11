@@ -242,29 +242,72 @@ class MT5Provider(Provider):
             out.append("\\".join(rel.parts))
         return out
 
+    @property
+    def exporter_paths(self) -> dict:
+        if not self.data_path:
+            return {}
+        dst = self.data_path / "MQL5" / "Experts" / "TIO_Exportador.mq5"
+        return {"mq5": dst, "ex5": dst.with_suffix(".ex5"), "folder": dst.parent,
+                "editor": self.install_path / "metaeditor64.exe" if self.install_path else None}
+
+    def exporter_state(self) -> dict:
+        ps = self.exporter_paths
+        if not ps:
+            return {"copied": False, "compiled": False, "note": "Pasta de dados do MT5 não encontrada."}
+        log = ps["mq5"].with_suffix(".log")
+        log_txt = ""
+        if log.exists():
+            raw = log.read_bytes()
+            log_txt = (raw.decode("utf-16", "ignore") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore"))[-1500:]
+        return {"copied": ps["mq5"].exists(), "compiled": ps["ex5"].exists(), "folder": str(ps["folder"]),
+                "editor_found": bool(ps["editor"] and ps["editor"].exists()), "compile_log": log_txt.strip()}
+
     def install_exporter(self) -> str:
         """Copia o EA exportador para MQL5/Experts e tenta compilá-lo com o MetaEditor."""
         import shutil
         import subprocess
         src = Path(__file__).resolve().parents[2] / "mql5" / "TIO_Exportador.mq5"
-        if not self.data_path or not src.exists():
+        ps = self.exporter_paths
+        if not ps or not src.exists():
             return "Pasta de dados do MT5 não encontrada."
-        dst_dir = self.data_path / "MQL5" / "Experts"
-        dst = dst_dir / src.name
+        dst, ex5 = ps["mq5"], ps["ex5"]
         try:
-            dst_dir.mkdir(parents=True, exist_ok=True)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             if not dst.exists() or dst.read_bytes() != src.read_bytes():
                 shutil.copyfile(src, dst)
-            ex5 = dst.with_suffix(".ex5")
             if ex5.exists() and ex5.stat().st_mtime >= dst.stat().st_mtime:
                 return "Exportador instalado e compilado."
-            editor = self.install_path / "metaeditor64.exe" if self.install_path else None
-            if editor and editor.exists():
-                subprocess.run([str(editor), f"/compile:{dst}", "/log"], timeout=90, check=False)
-            return ("Exportador instalado e compilado." if ex5.exists() else
-                    "Exportador copiado; abra-o no MetaEditor e aperte F7 para compilar.")
+            editor = ps["editor"]
+            if editor and editor.exists() and not getattr(self, "_compile_tried", False):
+                self._compile_tried = True  # tenta compilar uma vez por execução
+                # formato documentado pela MetaQuotes: metaeditor64.exe /compile:"arquivo" /log
+                cmd = f'"{editor}" /compile:"{dst}" /log'
+                subprocess.run(cmd, timeout=120, check=False, shell=False)
+            if ex5.exists():
+                return "Exportador instalado e compilado."
+            return ("Exportador copiado, mas não compilado automaticamente. Clique em 'Abrir no MetaEditor' "
+                    "e aperte F7.")
         except Exception as e:  # pragma: no cover - depende do Windows
             return f"Não foi possível instalar o exportador automaticamente: {e}"
+
+    def open_exporter(self, what: str = "editor") -> str:
+        """Abre o arquivo do exportador no MetaEditor (ou a pasta no Explorer). Só funciona no Windows."""
+        import subprocess
+        ps = self.exporter_paths
+        if not ps:
+            return "Pasta de dados do MT5 não encontrada."
+        self.install_exporter()
+        try:
+            if what == "folder":
+                os.startfile(str(ps["folder"]))  # type: ignore[attr-defined]
+                return "Pasta aberta."
+            if ps["editor"] and ps["editor"].exists():
+                subprocess.Popen([str(ps["editor"]), str(ps["mq5"])])
+            else:
+                os.startfile(str(ps["mq5"]))  # type: ignore[attr-defined]
+            return "MetaEditor aberto: aperte F7 para compilar."
+        except Exception as e:  # pragma: no cover
+            return f"Não consegui abrir automaticamente: {e}"
 
     def indicator_store(self, asset: str):
         from .mt5_indicators import IndicatorStore
