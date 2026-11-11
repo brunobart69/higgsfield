@@ -6,14 +6,43 @@ echo.
 echo  AI TRADING INTELLIGENCE OFFICE (somente analise - nao abre ordens)
 echo  Deixe o MetaTrader 5 ABERTO e logado antes de continuar.
 echo.
-where python >nul 2>nul
-if errorlevel 1 (
-  echo  [!] Python nao encontrado. Instale em https://www.python.org/downloads/
-  echo      e marque a opcao "Add python.exe to PATH" na instalacao.
+echo  Procurando uma versao do Python compativel com o MetaTrader 5...
+
+set "PY="
+rem O pacote MetaTrader5 so existe para algumas versoes do Python (64 bits).
+for %%V in (3.13 3.12 3.11 3.10) do (
+  if not defined PY (
+    py -%%V-64 -c "import sys" >nul 2>nul && (
+      py -%%V-64 -m pip install --quiet --disable-pip-version-check MetaTrader5 >nul 2>nul && set "PY=py -%%V-64"
+    )
+  )
+)
+if not defined PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+  "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -m pip install --quiet --disable-pip-version-check MetaTrader5 >nul 2>nul && set PY="%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+)
+
+if not defined PY (
+  echo.
+  echo  Nenhuma versao compativel encontrada. Instalando o Python 3.12 automaticamente...
+  echo  (pode demorar alguns minutos; aceite se o Windows pedir permissao)
+  winget install -e --id Python.Python.3.12 --scope user --accept-package-agreements --accept-source-agreements
+  if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -m pip install --quiet --disable-pip-version-check MetaTrader5 && set PY="%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+  )
+)
+
+if not defined PY (
+  echo.
+  echo  [!] Nao consegui preparar o Python automaticamente.
+  echo      Instale o Python 3.12 ^(64 bits^) por este link e rode este arquivo de novo:
+  echo      https://www.python.org/downloads/release/python-3128/
+  echo      ^(escolha "Windows installer 64-bit" e marque "Add python.exe to PATH"^)
   pause
   exit /b 1
 )
-python -m pip install --quiet --disable-pip-version-check MetaTrader5
-start "" /min cmd /c "timeout /t 5 >nul & start http://127.0.0.1:8765"
-python -m tio --provider mt5 serve
+
+echo  Usando: %PY%
+echo  Abrindo o painel no navegador em alguns segundos...
+start "" /min cmd /c "timeout /t 6 >nul & start http://127.0.0.1:8765"
+%PY% -m tio --provider mt5 serve
 pause
