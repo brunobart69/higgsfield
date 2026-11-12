@@ -117,7 +117,18 @@ class PriceActionAgent(Agent):
             q = max(0.25, 1 - age / 60) * (0.6 if noise else 1.0)
             self.ev(rep, e.kind.lower(), f"{e.kind} de {DIR_LABEL[e.direction]} em {_fmt(e.level)} ({tf}, há {age} candles fechados)",
                     e.direction, 0.8 if e.kind == "BOS" else 0.7, q, tf)
-            rep.data["structure_events"] = [{"ts": x.ts, "kind": x.kind, "dir": x.direction, "level": x.level} for x in st.events[-6:]]
+            rep.data["structure_events"] = [{"ts": x.ts, "kind": x.kind, "dir": x.direction, "level": x.level,
+                                             "swing_ts": x.swing_ts} for x in st.events[-20:]]
+            # Strong/Weak (SMC): o extremo que originou o último rompimento é "forte"; o extremo atual é "fraco" (alvo)
+            ev = st.events[-1]
+            seg = cs[max(0, ev.idx - 40):ev.idx + 1]
+            after = cs[ev.idx:]
+            if ev.direction == 1 and seg and after:
+                rep.data["strong_weak"] = {"strong": {"kind": "STRONG LOW", "price": min(c.low for c in seg)},
+                                           "weak": {"kind": "WEAK HIGH", "price": max(c.high for c in after)}}
+            elif seg and after:
+                rep.data["strong_weak"] = {"strong": {"kind": "STRONG HIGH", "price": max(c.high for c in seg)},
+                                           "weak": {"kind": "WEAK LOW", "price": min(c.low for c in after)}}
         disp = [i for i in ind.displacements(cs, ctx.atr_series(tf)) if i >= n - 8]
         if disp:
             i = disp[-1]
@@ -126,9 +137,11 @@ class PriceActionAgent(Agent):
                     d, 0.5, 0.9 - 0.08 * (n - 1 - i), tf)
         price = cs[-1].close
         fvgs = [z for z in ind.fair_value_gaps(cs[-150:], 0.15 * atr) if not z.mitigated]
+        all_fvg = ind.fair_value_gaps(cs[-160:], 0.15 * atr)
+        rep.data["fvg_all"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts, "mitigated": z.mitigated} for z in all_fvg[-25:]]
         obs = [z for z in ind.order_blocks(cs[-200:], ind.displacements(cs[-200:], ind.atr(cs[-200:]))) if not z.mitigated]
-        rep.data["fvg"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in fvgs[-5:]]
-        rep.data["order_blocks"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in obs[-5:]]
+        rep.data["fvg"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in fvgs[-8:]]
+        rep.data["order_blocks"] = [{"low": z.low, "high": z.high, "dir": z.direction, "ts": z.ts} for z in obs[-8:]]
         for z in (fvgs[-4:] + obs[-4:]):
             near = (z.low - 0.5 * atr) <= price <= (z.high + 0.5 * atr)
             if near and ((z.direction == 1 and price >= z.low) or (z.direction == -1 and price <= z.high)):
@@ -670,6 +683,32 @@ class LiquidityHunterAgent(Agent):
         rep.data["pools"] = [{"price": p.price, "side": p.side, "kind": kind_pt.get(p.kind, p.kind), "count": p.count,
                               "external": p.external, "dist_atr": round((p.price - price) / atr, 2)} for p in above + below] + extra
         rep.data["swept"] = [{"price": p.price, "side": p.side, "ts": p.swept_ts} for p in pools if p.swept][-6:]
+        # níveis em que topos/fundos de temporalidades diferentes coincidem ("M15 · M30", "M30 · H1", "H1 · H4")
+        pts = []
+        for t in ("M5", "M15", "M30", "H1", "H4"):
+            if ctx.enough(t, 40):
+                for s in ctx.swings(t)[-14:]:
+                    pts.append((s.price, t, s.kind))
+        pts.sort()
+        order = ["M1", "M5", "M15", "M30", "H1", "H4"]
+        mtf, used = [], set()
+        tol_m = 0.3 * atr
+        for i, (p, t, k) in enumerate(pts):
+            if i in used:
+                continue
+            grp = [(p, t, k)]
+            for j in range(i + 1, len(pts)):
+                if pts[j][0] - p > tol_m:
+                    break
+                grp.append(pts[j])
+                used.add(j)
+            tfs = sorted({g[1] for g in grp}, key=order.index)
+            if len(tfs) >= 2:
+                lvl = max(g[0] for g in grp) if grp[0][2] == "H" else min(g[0] for g in grp)
+                swept = any((c.high > lvl if lvl > price else c.low < lvl) for c in cs[-3:])
+                mtf.append({"price": lvl, "tfs": tfs, "label": " · ".join(tfs[-2:]), "side": "acima" if lvl > price else "abaixo",
+                            "dist_atr": round((lvl - price) / atr, 2), "swept_now": swept})
+        rep.data["mtf_levels"] = sorted(mtf, key=lambda m: abs(m["dist_atr"]))[:8]
         sweeps = ind.detect_sweeps(cs, pools, 4)
         if sweeps:
             s = sweeps[-1]
@@ -710,6 +749,13 @@ class UserIndicatorsAgent(Agent):
         rep = self.new_report(ctx)
         tf = ctx.focus_tf
         exports = {k: v for k, v in (ctx.data.indicators or {}).items() if k[1] == tf}
+        objs = (ctx.data.chart_objects or {}).get(tf)
+        if objs:
+            self.read_marks(ctx, rep, objs)
+        if not exports and objs:
+            if not rep.evidence:
+                rep.summary = "Li as marcações do seu indicador no gráfico: nada ativo perto do preço na última vela fechada."
+            return rep
         if not exports:
             rep.abstain = True
             rep.summary = (f"Nenhum indicador do MT5 exportado para {tf}. Escolha seus indicadores na aba MT5 "
@@ -760,6 +806,38 @@ class UserIndicatorsAgent(Agent):
         if not rep.evidence and not rep.abstain:
             rep.summary = "Indicadores do MT5 lidos: nenhum sinal na última barra fechada."
         return rep
+
+    def read_marks(self, ctx: MarketContext, rep: AgentReport, objs: list) -> None:
+        """Usa as marcações desenhadas pelo indicador (BOS/CHoCH, OB/FVG, liquidez) como evidência."""
+        from ..data.mt5_objects import classify
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf) or []
+        atr = ctx.atr(tf) or 0
+        if not cs or not atr:
+            return
+        name = next((n for n in ctx.data.chart_indicators if n), "indicador do gráfico")
+        visible = [o for o in objs if not o["t1"] or o["t1"] <= ctx.as_of]       # nada desenhado depois do instante
+        mk = classify(visible, cs, atr)
+        rep.data["marks"] = {"indicator": name, "events": mk["events"][-8:], "zones": mk["zones"][-10:], "levels": mk["levels"][:20]}
+        price = cs[-1].close
+        sec = TF_SECONDS[tf]
+        ev = [e for e in mk["events"] if e["dir"] and ctx.as_of - e["ts"] <= 15 * sec]
+        if ev:
+            e = ev[-1]
+            rep.data.setdefault("signals", {})[f"{name}:{e['kind']}"] = e["dir"]
+            self.ev(rep, "user_mark_structure", f"{name}: {e['kind']} de {DIR_LABEL[e['dir']]} em {_fmt(e['price'])} "
+                                                f"({fmt_ts(e['ts'])})", e["dir"], 0.5 if e["kind"] == "BOS" else 0.45, 0.6, tf)
+        for z in mk["zones"]:
+            if z["low"] - 0.2 * atr <= price <= z["high"] + 0.2 * atr and z["kind"] in ("OB", "FVG", "OB?", "FVG?"):
+                d = BULL if price >= (z["low"] + z["high"]) / 2 else BEAR
+                rep.data.setdefault("signals", {})[f"{name}:{z['kind'].rstrip('?')}"] = d
+                self.ev(rep, "user_mark_zone", f"{name}: preço na zona {z['kind'].rstrip('?')} [{_fmt(z['low'])}–{_fmt(z['high'])}] "
+                                               f"→ reação esperada de {DIR_LABEL[d]}", d, 0.4, 0.5, tf)
+                break
+        near = [lv for lv in mk["levels"] if lv["kind"] in ("LIQ", "EQH", "EQL", "MTF") and abs(lv["price"] - price) <= 0.5 * atr]
+        if near:
+            rep.warnings.append(f"{name}: preço perto de {near[0]['label'] or near[0]['kind']} em {_fmt(near[0]['price'])} "
+                                "— possível busca de liquidez.")
 
 
 # =========================================================================== 14

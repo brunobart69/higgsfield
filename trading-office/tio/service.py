@@ -107,8 +107,60 @@ class OfficeService:
                 return None
             md = MarketData(asset, b, extra)
             md.indicators = self.load_user_indicators(asset)
+            md.chart_objects, md.chart_indicators = self.load_chart_objects(asset)
             self._data[(asset, tf)] = (stamp, md)
             return md
+
+    def load_chart_objects(self, asset: str) -> tuple[dict, list]:
+        """Objetos desenhados nos gráficos do MT5 para este ativo (por temporalidade do gráfico)."""
+        p = self.provider
+        if not hasattr(p, "export_dir"):
+            return {}, []
+        from .data.mt5_objects import read_export
+        try:
+            sym = p.symbol(asset)
+            exp = read_export(p.export_dir, p.server_offset(sym) if sym else 0)
+        except Exception:
+            return {}, []
+        objs = {tf: o for (s, tf), o in exp["objects"].items() if s == sym}
+        inds = sorted({i for c in exp["charts"] if c["symbol"] == sym for i in c["indicators"] if "TIO_" not in i})
+        return objs, inds
+
+    def markings(self, asset: str, tf: str) -> dict:
+        """Marcações do escritório × marcações do seu indicador no MT5 (para conferir se os agentes estão vendo)."""
+        from .data.mt5_objects import classify, compare
+        res = self.analyze(asset, tf)
+        if "error" in res:
+            return res
+        md = self._md_for(asset, tf)
+        rep = {r["agent"]: r for r in res["reports"]}
+        pa, liq, vp, sr = (rep.get(k, {}).get("data", {}) for k in ("PA", "LIQ", "VP", "SR"))
+        office = {
+            "events": pa.get("structure_events", []),
+            "zones": [dict(z, kind="FVG") for z in pa.get("fvg_all", [])] + [dict(z, kind="OB") for z in pa.get("order_blocks", [])],
+            "levels": [p["price"] for p in liq.get("pools", [])] + [m["price"] for m in liq.get("mtf_levels", [])]
+                      + [z["low"] for z in sr.get("zones", [])] + [z["high"] for z in sr.get("zones", [])],
+            "poc": vp.get("poc"),
+        }
+        out = {"asset": asset, "tf": tf, "office_counts": {"BOS/CHoCH": len(office["events"]), "Zonas": len(office["zones"]),
+                                                            "Níveis": len(office["levels"])},
+               "connected": self.provider.name == "mt5", "charts": [], "indicator": None, "compare": None}
+        if self.provider.name == "mt5":
+            from .data.mt5_objects import read_export
+            p = self.provider
+            sym = p.symbol(asset)
+            exp = read_export(p.export_dir, p.server_offset(sym) if sym else 0)
+            out["charts"] = [c for c in exp["charts"] if c["symbol"] == sym]
+            objs = (md.chart_objects or {}).get(tf) if md else None
+            if objs:
+                cs = md.closed(tf, md.base[-1].close_ts, 400) if tf in md.tf else md.base[-400:]
+                from .indicators import last_atr
+                atr = last_atr(cs) or 1e-9
+                mk = classify(objs, cs, atr)
+                out["indicator"] = {"name": ", ".join(md.chart_indicators) or "objetos do gráfico", "objects": len(objs),
+                                    "events": mk["events"][-30:], "zones": mk["zones"][-30:], "levels": mk["levels"][:40]}
+                out["compare"] = compare(mk, office, atr, TF_SECONDS[tf])
+        return out
 
     def load_user_indicators(self, asset: str) -> dict:
         if not hasattr(self.provider, "indicator_store"):
@@ -255,6 +307,24 @@ class OfficeService:
         fib = rep.get("FIB", {}).get("data", {}).get("categories", {}) or {}
         ov["fib"] = {k: v for k, v in fib.items() if v}
         ov["trendlines"] = rep.get("TL", {}).get("data", {}).get("lines", [])
+        pa = rep.get("PA", {}).get("data", {})
+        ov["events"] = pa.get("structure_events", [])
+        ov["fvg_all"] = pa.get("fvg_all", [])
+        ov["strong_weak"] = pa.get("strong_weak")
+        ov["mtf_levels"] = rep.get("LIQ", {}).get("data", {}).get("mtf_levels", [])
+        ov["tf_seconds"] = TF_SECONDS.get(tf or md.base_tf, 60)
+        # volume profile com divisão compradora (velas de alta) × vendedora (velas de baixa), como no MT5
+        lo = min(c.low for c in cs)
+        hi = max(c.high for c in cs)
+        nb, step = 48, (hi - lo) / 48 if hi > lo else 1
+        bull, bear = [0.0] * nb, [0.0] * nb
+        for c in cs:
+            w = c.volume or 1.0
+            b0, b1 = min(nb - 1, int((c.low - lo) / step)), min(nb - 1, int((c.high - lo) / step))
+            for b in range(b0, b1 + 1):
+                (bull if c.close >= c.open else bear)[b] += w / (b1 - b0 + 1)
+        ov["profile"] = {"lo": lo, "step": step, "bull": [round(x, 2) for x in bull], "bear": [round(x, 2) for x in bear]}
+        ov["user_marks"] = rep.get("MT5I", {}).get("data", {}).get("marks")
         return ov
 
     def overview(self, tf: Optional[str] = None) -> list[dict]:

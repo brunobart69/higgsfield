@@ -58,12 +58,20 @@
     <div class="card span2" id="c-market">
       <div class="ch"><h2>1 · Mercado atual</h2><select id="asset"></select></div>
       <div class="price-row"><div id="px" class="px">—</div><div id="decision" class="pill">—</div></div>
-      <canvas id="chart" height="340"></canvas>
-      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg ouro">Taxa Ouro (mensal)</span><span class="lg prata">Taxa Prata (semanal)</span><span class="lg fib">Fibonacci</span><span class="lg tl">LTA / LTB</span></div>
+      <div class="office-actions small" style="margin-bottom:6px">
+        <label><input type="checkbox" id="mk-office" checked> Marcações do escritório</label>
+        <label><input type="checkbox" id="mk-user" checked> <span style="color:#ffcc33">★ Marcações do seu indicador (MT5)</span></label>
+      </div>
+      <canvas id="chart" height="440"></canvas>
+      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg ouro">Taxa Ouro (mensal)</span><span class="lg prata">Taxa Prata (semanal)</span><span class="lg fib">Fibonacci</span><span class="lg tl">LTA / LTB</span><span class="lg bos">BOS / CHoCH</span><span class="lg ob">Order Block / FVG</span><span class="lg mtf">Liquidez multi-TF</span><span class="lg user">★ seu indicador</span></div>
     </div>
     <div class="card" id="c-decision">
       <div class="ch"><h2>11 · Decisão coletiva</h2></div>
       <div id="decision-box"></div>
+    </div>
+    <div class="card span3" id="c-check">
+      <div class="ch"><h2>Conferência: os agentes estão vendo o seu indicador?</h2><button class="ghost" id="check-refresh">Conferir agora</button></div>
+      <div id="check"></div>
     </div>
     <div class="card span3" id="c-assets">
       <div class="ch"><h2>2 · Ativos monitorados</h2><button class="ghost" id="refresh">Atualizar</button></div>

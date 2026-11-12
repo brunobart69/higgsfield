@@ -41,54 +41,111 @@ function ctx2d(cv) {
   return [c, w, cv._h];
 }
 
+const MK = { office: true, user: true };
+function pillAt(c, x, y, text, stroke, fill) {
+  c.font = "600 10px Inter, sans-serif"; const w = c.measureText(text).width + 12;
+  c.fillStyle = fill || "rgba(10,12,16,.92)"; c.strokeStyle = stroke; c.lineWidth = 1;
+  c.beginPath(); const r = 8, x0 = x - w / 2, y0 = y - 8; c.moveTo(x0 + r, y0); c.arcTo(x0 + w, y0, x0 + w, y0 + 16, r); c.arcTo(x0 + w, y0 + 16, x0, y0 + 16, r); c.arcTo(x0, y0 + 16, x0, y0, r); c.arcTo(x0, y0, x0 + w, y0, r); c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = "#e6edf2"; c.textAlign = "center"; c.fillText(text, x, y + 3.5); c.textAlign = "left";
+}
 function drawChart(an) {
   const cv = $("#chart"); const [c, W, H] = ctx2d(cv);
   const ch = an.chart; const cs = ch.candles; if (!cs.length) return;
-  const padR = 64, padB = 18;
+  const padR = 70, padB = 18, chartW = W - padR;
   let lo = Math.min(...cs.map((k) => k[3])), hi = Math.max(...cs.map((k) => k[2]));
   const m = (hi - lo) * 0.08; lo -= m; hi += m;
   const y = (p) => (H - padB) * (1 - (p - lo) / (hi - lo));
-  const bw = (W - padR) / cs.length;
-  c.clearRect(0, 0, W, H);
-  c.strokeStyle = css("--line"); c.lineWidth = 1; c.fillStyle = css("--muted"); c.font = "10px JetBrains Mono, monospace";
-  for (let i = 0; i <= 5; i++) { const p = lo + (hi - lo) * i / 5; const yy = y(p); c.beginPath(); c.moveTo(0, yy); c.lineTo(W - padR, yy); c.stroke(); c.fillText(fmtP(p), W - padR + 4, yy + 3); }
-  const band = (a, b, color) => { if (a == null || b == null) return; c.fillStyle = color; c.fillRect(0, y(Math.max(a, b)), W - padR, Math.abs(y(a) - y(b)) || 1); };
-  const line = (p, color, dash, label) => { if (p == null || p < lo || p > hi) return; c.strokeStyle = color; c.setLineDash(dash || []); c.beginPath(); c.moveTo(0, y(p)); c.lineTo(W - padR, y(p)); c.stroke(); c.setLineDash([]); if (label) { c.fillStyle = color; c.fillText(label, 4, y(p) - 3); } };
-  band(ch.val, ch.vah, "rgba(242,181,58,.06)");
-  const lastPx = cs[cs.length - 1][4];
-  (ch.zones || []).slice().sort((a, b) => Math.abs((a.low + a.high) / 2 - lastPx) - Math.abs((b.low + b.high) / 2 - lastPx)).slice(0, 4).forEach((z) => band(z.low, z.high, "rgba(74,168,255,.12)"));
-  (ch.fvg || []).forEach((z) => band(z.low, z.high, z.dir > 0 ? "rgba(25,210,124,.08)" : "rgba(255,77,94,.08)"));
-  line(ch.poc, css("--amber"), [], "POC");
-  Object.entries(ch.fib || {}).forEach(([cat, f]) => {
-    const col = cat === "OURO" ? css("--gold") : cat === "PRATA" ? css("--silver") : "rgba(111,211,196,.55)";
-    const name = cat === "OURO" ? "TAXA OURO" : cat === "PRATA" ? "TAXA PRATA" : cat;
-    const keys = cat === "OURO" || cat === "PRATA" ? ["0.236", "0.382", "0.500", "0.618", "0.786"] : ["0.382", "0.500", "0.618"];
-    if (cat === "OURO" || cat === "PRATA") c.lineWidth = 1.3;
-    keys.forEach((k) => line(f.levels[k], col, cat === "OURO" || cat === "PRATA" ? [6, 3] : [2, 4], `${name} ${k}`));
-    c.lineWidth = 1;
-  });
-  const tsx = (ts) => { // posição x de um instante (interpolação nos candles do gráfico)
-    if (ts <= cs[0][0]) return bw / 2; if (ts >= cs[cs.length - 1][0]) return (cs.length - 1) * bw + bw / 2;
+  const bw = chartW / cs.length;
+  const t0 = cs[0][0], tN = cs[cs.length - 1][0];
+  const tsx = (ts) => {
+    if (ts <= t0) return bw / 2; if (ts >= tN) return (cs.length - 1) * bw + bw / 2;
     let i = cs.findIndex((k) => k[0] >= ts); const a = cs[i - 1][0], b = cs[i][0];
     return (i - 1 + (ts - a) / (b - a)) * bw + bw / 2;
   };
-  (ch.trendlines || []).forEach((l) => {
-    const x1 = tsx(l.t1), x2 = tsx(l.t2); if (l.t1 < cs[0][0]) return;
-    c.strokeStyle = l.kind === "LTA" ? css("--green") : css("--red"); c.lineWidth = 1.6; c.setLineDash([]);
-    c.beginPath(); c.moveTo(x1, y(l.p1)); c.lineTo(x2, y(l.p2)); c.stroke(); c.lineWidth = 1;
-    c.fillStyle = c.strokeStyle; c.fillText(`${l.kind} ${l.tf}`, Math.min(x2 - 40, W - padR - 60), y(l.p2) - 4);
-  });
-  (ch.pools || []).filter((p) => (p.count || 1) > 1).slice(0, 4).forEach((p) => line(p.price, "rgba(180,140,255,.7)", [6, 4], `${p.kind}`));
+  const inR = (p) => p != null && p >= lo && p <= hi;
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = "#07090d"; c.fillRect(0, 0, W, H);
+  c.strokeStyle = "rgba(255,255,255,.04)"; c.lineWidth = 1; c.fillStyle = css("--muted"); c.font = "10px JetBrains Mono, monospace";
+  for (let i = 0; i <= 6; i++) { const p = lo + (hi - lo) * i / 6; const yy = y(p); c.beginPath(); c.moveTo(0, yy); c.lineTo(chartW, yy); c.stroke(); c.fillText(fmtP(p), chartW + 4, yy + 3); }
+  const hline = (p, color, dash, label, x0, lw, labelRight) => {
+    if (!inR(p)) return; c.strokeStyle = color; c.lineWidth = lw || 1; c.setLineDash(dash || []);
+    c.beginPath(); c.moveTo(x0 || 0, y(p)); c.lineTo(chartW, y(p)); c.stroke(); c.setLineDash([]); c.lineWidth = 1;
+    if (label) { c.font = "600 10px Inter, sans-serif"; c.fillStyle = color; const tw = c.measureText(label).width; c.fillText(label, labelRight ? chartW - tw - 6 : (x0 || 0) + 4, y(p) - 4); }
+  };
+  const box = (z, fill, label, color) => {
+    const x0 = Math.max(0, tsx(z.ts || z.t1 || t0)); const yt = y(Math.max(z.low, z.high)), yb = y(Math.min(z.low, z.high));
+    if (yb < 0 || yt > H) return; c.fillStyle = fill; c.fillRect(x0, yt, chartW - x0, Math.max(2, yb - yt));
+    if (label) { c.font = "600 9px Inter, sans-serif"; c.fillStyle = color; c.fillText(label, Math.min(x0 + 4, chartW - 70), yt + 10); }
+  };
+  // ----- volume profile na lateral (compra × venda)
+  const pf = ch.profile;
+  if (pf) {
+    const tot = pf.bull.map((v, i) => v + pf.bear[i]); const mx = Math.max(...tot) || 1; const maxW = Math.min(150, chartW * 0.22);
+    pf.bull.forEach((v, i) => {
+      const p0 = pf.lo + i * pf.step, p1 = p0 + pf.step; if (!inR(p0) && !inR(p1)) return;
+      const yt = y(p1), hgt = Math.max(1, y(p0) - yt - 1); const wb = maxW * v / mx, wr = maxW * pf.bear[i] / mx;
+      c.fillStyle = "rgba(70,130,255,.45)"; c.fillRect(chartW - wb, yt, wb, hgt);
+      c.fillStyle = "rgba(255,61,110,.40)"; c.fillRect(chartW - wb - wr, yt, wr, hgt);
+    });
+  }
+  if (MK.office) {
+    (ch.fvg_all || []).filter((z) => !z.mitigated).slice(-10).forEach((z) => box(z, z.dir > 0 ? "rgba(25,210,124,.10)" : "rgba(255,77,94,.10)", "FVG", z.dir > 0 ? css("--green") : css("--red")));
+    (ch.order_blocks || []).forEach((z) => box(z, z.dir > 0 ? "rgba(40,170,140,.22)" : "rgba(200,60,90,.22)", "ORDER BLOCK", z.dir > 0 ? "#3ee6a8" : "#ff6b8a"));
+    (ch.zones || []).slice().sort((a, b) => Math.abs((a.low + a.high) / 2 - cs[cs.length - 1][4]) - Math.abs((b.low + b.high) / 2 - cs[cs.length - 1][4])).slice(0, 3)
+      .forEach((z) => box({ ...z, ts: t0 }, "rgba(74,168,255,.08)", null));
+    // Taxas Ouro / Prata com preço no rótulo
+    Object.entries(ch.fib || {}).forEach(([cat, f]) => {
+      const tax = cat === "OURO" || cat === "PRATA"; const col = cat === "OURO" ? css("--gold") : cat === "PRATA" ? css("--silver") : "rgba(111,211,196,.6)";
+      (tax ? ["0.236", "0.382", "0.500", "0.618", "0.705", "0.786"] : ["0.500", "0.618", "0.705"]).forEach((k) => {
+        const v = f.levels[k]; if (!inR(v)) return;
+        hline(v, col, tax ? [6, 3] : [2, 4], `${tax ? (cat === "OURO" ? "TAXA OURO " : "TAXA PRATA ") : ""}${k}(${fmtP(v)})`, chartW * 0.55, tax ? 1.2 : 1);
+      });
+    });
+    // liquidez: multi-temporalidade, equal highs/lows, strong/weak
+    (ch.mtf_levels || []).forEach((lv) => hline(lv.price, "#9b8cff", [7, 4], lv.label, 0, 1, true));
+    (ch.pools || []).filter((p) => (p.count || 1) > 1).slice(0, 4).forEach((p) => hline(p.price, "#7aa7ff", [2, 3], p.kind === "Equal Highs" ? "EQH" : p.kind === "Equal Lows" ? "EQL" : "LIQUIDEZ", chartW * 0.35));
+    const sw = ch.strong_weak;
+    if (sw) { hline(sw.strong.price, "#2ad1a3", [3, 3], sw.strong.kind, chartW * 0.6, 1, true); hline(sw.weak.price, "#ff5c8a", [3, 3], sw.weak.kind, chartW * 0.6, 1, true); }
+    if (inR(ch.poc)) hline(ch.poc, "#f2d43a", [8, 4], "POC", 0, 1.4, true);
+    // LTA / LTB
+    (ch.trendlines || []).forEach((l) => {
+      if (l.t1 < t0) return; c.strokeStyle = l.kind === "LTA" ? css("--green") : css("--red"); c.lineWidth = 1.6;
+      c.beginPath(); c.moveTo(tsx(l.t1), y(l.p1)); c.lineTo(tsx(l.t2), y(l.p2)); c.stroke(); c.lineWidth = 1;
+    });
+  }
+  // ----- velas
   cs.forEach((k, i) => {
-    const [ts, o, h, l, cl] = k; const x = i * bw + bw / 2; const up = cl >= o;
-    c.strokeStyle = c.fillStyle = up ? css("--green") : css("--red");
+    const [, o, h, l, cl] = k; const x = i * bw + bw / 2; const up = cl >= o;
+    c.strokeStyle = c.fillStyle = up ? "#3d8bff" : "#ff3d6e";
     c.beginPath(); c.moveTo(x, y(h)); c.lineTo(x, y(l)); c.stroke();
     const top = y(Math.max(o, cl)), bot = y(Math.min(o, cl));
     c.fillRect(x - bw * 0.35, top, Math.max(1, bw * 0.7), Math.max(1, bot - top));
   });
-  const last = cs[cs.length - 1][4]; c.fillStyle = css("--text"); c.fillRect(W - padR, y(last) - 7, padR, 14); c.fillStyle = "#000"; c.fillText(fmtP(last), W - padR + 4, y(last) + 3);
-  c.fillStyle = css("--muted"); c.fillText(tsLbl(cs[0][0]), 2, H - 4); c.fillText(tsLbl(cs[cs.length - 1][0]) + " UTC", W - padR - 120, H - 4);
+  // ----- BOS / CHoCH: linha do pivô rompido até o rompimento + etiqueta
+  if (MK.office) {
+    (ch.events || []).filter((e) => e.ts >= t0 && inR(e.level)).slice(-8).forEach((e) => {
+      const x1 = tsx(Math.max(e.swing_ts || e.ts, t0)), x2 = tsx(e.ts); const col = e.dir > 0 ? "#cfd8e3" : "#cfd8e3";
+      c.strokeStyle = col; c.beginPath(); c.moveTo(x1, y(e.level)); c.lineTo(x2, y(e.level)); c.stroke();
+      pillAt(c, (x1 + x2) / 2, y(e.level) + (e.dir > 0 ? -10 : 10), e.kind === "CHOCH" ? "CHoCH" : "BOS", e.dir > 0 ? "#6aa8ff" : "#ff6b8a");
+    });
+  }
+  // ----- marcações do SEU indicador (MT5), desenhadas por cima em estilo próprio
+  const um = ch.user_marks;
+  if (MK.user && um) {
+    (um.zones || []).forEach((z) => { const x0 = Math.max(0, tsx(z.t1 || t0)); const yt = y(z.high), yb = y(z.low); if (yb < 0 || yt > H) return;
+      c.setLineDash([4, 3]); c.strokeStyle = "#ffcc33"; c.strokeRect(x0, yt, chartW - x0, Math.max(2, yb - yt)); c.setLineDash([]);
+      c.fillStyle = "#ffcc33"; c.font = "600 9px Inter, sans-serif"; c.fillText(`★ ${z.kind}`, Math.min(x0 + 4, chartW - 60), yb - 3); });
+    (um.levels || []).forEach((lv) => hline(lv.price, "#ffcc33", [1, 3], `★ ${lv.label || lv.kind}`, chartW * 0.2, 1));
+    (um.events || []).filter((e) => e.ts >= t0 && inR(e.price)).forEach((e) => pillAt(c, tsx(e.ts), y(e.price) - 14, `★ ${e.kind === "CHOCH" ? "CHoCH" : "BOS"}`, "#ffcc33", "rgba(40,30,0,.9)"));
+  }
+  // ----- preço atual e cronômetro da vela
+  const last = cs[cs.length - 1][4]; c.fillStyle = "#e6edf2"; c.fillRect(chartW, y(last) - 7, padR, 14); c.fillStyle = "#000"; c.font = "10px JetBrains Mono, monospace"; c.fillText(fmtP(last), chartW + 4, y(last) + 3);
+  c.fillStyle = css("--muted"); c.fillText(tsLbl(t0), 2, H - 4); c.fillText(tsLbl(tN) + " UTC", chartW - 120, H - 4);
+  const sec = ch.tf_seconds || 60; const left = sec - Math.floor(Date.now() / 1000) % sec;
+  c.font = "700 16px JetBrains Mono, monospace"; c.fillStyle = "#57d38c";
+  c.fillText(`${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`, 8, 20);
 }
+setInterval(() => { if (S.analysis && activeTab && activeTab() === "painel") drawChart(S.analysis); }, 1000);
 
 function drawProfile(vp, price) {
   const cv = $("#profile"); const [c, W, H] = ctx2d(cv); c.clearRect(0, 0, W, H);
@@ -192,7 +249,7 @@ async function loadOverview() {
 async function loadAnalysis() {
   const an = await api(`/api/analysis?asset=${S.asset}&tf=${S.tf}`);
   if (an.error) { $("#decision-box").textContent = an.error; return; }
-  S.analysis = an; drawAll(); renderRoom();
+  S.analysis = an; drawAll(); renderRoom(); loadCheck();
 }
 
 const rep = (code) => (S.analysis.reports || []).find((r) => r.agent === code) || { data: {}, warnings: [], evidence: [] };
@@ -593,6 +650,31 @@ $("#res-text-form").onsubmit = async (e) => {
     (r.note ? `<p class="small wait">${esc(r.note)}</p>` : `<table><tr><th>Ideia</th><th>Mesa</th><th>Status</th><th>Validação</th><th>Motivo</th></tr>${r.results.map((x) => `<tr><td class="small">${esc(x.label)}</td><td>${x.tf}</td><td>${stTag(x.status)}</td><td class="small mono">${st2(x.out_sample)}</td><td class="small">${esc(x.reason)}</td></tr>`).join("")}</table>`);
   loadResearch();
 };
+
+// ------------------------------------------------------------------ conferência de marcações
+$("#mk-office").onchange = (e) => { MK.office = e.target.checked; if (S.analysis) drawChart(S.analysis); };
+$("#mk-user").onchange = (e) => { MK.user = e.target.checked; if (S.analysis) drawChart(S.analysis); };
+async function loadCheck() {
+  const r = await api(`/api/markings?asset=${S.asset}&tf=${S.tf}`);
+  const el = $("#check"); if (!el) return;
+  if (r.error) { el.textContent = r.error; return; }
+  const oc = r.office_counts;
+  let html = `<p class="small">O escritório detectou em ${r.asset.slice(0, 3)}/${r.asset.slice(3)} ${r.tf}: <b>${oc["BOS/CHoCH"]}</b> BOS/CHoCH, <b>${oc.Zonas}</b> zonas (OB/FVG), <b>${oc["Níveis"]}</b> níveis de liquidez/S/R — todos desenhados no gráfico acima.</p>`;
+  if (!r.connected) {
+    html += `<p class="small wait">Sem conexão com o MT5 nesta sessão: não dá para comparar com o seu indicador. No programa instalado, abra o gráfico do par com o seu indicador e deixe o TIO_Exportador ligado em qualquer gráfico.</p>`;
+  } else if (!r.indicator) {
+    const charts = r.charts.map((c) => `${c.symbol} ${c.tf} (${c.indicators.join(", ") || "sem indicadores"})`).join(" · ");
+    html += `<p class="small wait"><b>Nenhuma marcação do seu indicador chegou para ${r.tf}.</b> Gráficos abertos deste par: ${esc(charts || "nenhum")}. Abra no MT5 o gráfico de ${r.asset} em ${r.tf} com o seu indicador. Se ele aparece na lista mas não há marcações, ele desenha só em buffers: escolha-o na aba MT5.</p>`;
+  } else {
+    const cp = r.compare;
+    html += `<p class="small">Seu indicador (<b>${esc(r.indicator.name)}</b>) tem <b>${r.indicator.objects}</b> objetos no gráfico ${r.tf}. Os agentes leem essas marcações (Nina · agente 13) e o escritório coincide com <b>${cp.rate == null ? "—" : pct(cp.rate, 0)}</b> delas:</p>
+      <div class="check-grid">${Object.entries(cp.by_kind).map(([k, v]) => `<div class="kpi"><small>${esc(k)}</small><b>${v.matched}/${v.indicator}</b>${v.rate != null ? ` <span class="small ${v.rate >= 0.6 ? "up" : "wait"}">${pct(v.rate, 0)}</span>` : ""}
+        ${v.missed.length ? `<div class="small muted">não detectado pelo escritório: ${v.missed.map((x) => esc((x.kind || "") + " " + fmtP(x.price ?? x.low))).join(", ")}</div>` : ""}</div>`).join("")}</div>
+      <p class="small muted">As marcações do seu indicador aparecem no gráfico com ★ (amarelo). Diferenças são normais: cada indicador usa regras próprias de pivô e tolerância.</p>`;
+  }
+  el.innerHTML = html;
+}
+$("#check-refresh").onclick = loadCheck;
 
 // ------------------------------------------------------------------ boot
 $("#refresh").onclick = () => { loadOverview(); loadAnalysis(); loadHistory(); };

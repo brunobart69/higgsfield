@@ -47,6 +47,8 @@ def make_handler(svc: OfficeService):
                     return self._json(svc.overview(tf))
                 if u.path == "/api/scan":
                     return self._json(svc.scan(tf))
+                if u.path == "/api/markings":
+                    return self._json(svc.markings(q.get("asset", "EURUSD").upper(), tf or svc.base_tf))
                 if u.path == "/api/research":
                     return self._json(svc.research_view())
                 if u.path == "/api/mistakes":

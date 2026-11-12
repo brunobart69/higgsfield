@@ -345,3 +345,40 @@ def test_research_lab_approves_only_real_edge_and_agent_uses_it(monkeypatch):
     assert it["url"].endswith("abc")
     assert sources.credibility(it["title"] + it["summary"])["label"] == "suspeito"
     assert sources.extract_mentions(it["title"])[0] == {"key": "rsi", "params": {"n": 7}}
+
+
+def test_user_chart_marks_are_read_and_compared(tmp_path):
+    from tio.data import mt5_objects as mo
+    d = MarketData.load(SyntheticProvider(bars=1500, end=END), "EURUSD", "M15")
+    cs = d.base
+    st = __import__("tio.indicators", fromlist=["x"])
+    sw = st.swings(cs)
+    ev = st.market_structure(cs, sw).events[-1]
+    last = cs[-1]
+    # arquivo no formato do TIO_Exportador (UTF-16, tabulado), com marcações no estilo do indicador do usuário
+    rows = ["chart\tsymbol\tperiod\tname\ttype\ttext\tt1\tp1\tt2\tp2\tcolor",
+            f"1\tEURUSD\t15\tult_bos\tOBJ_TEXT\t{ev.kind if ev.kind == 'BOS' else 'CHoCH'}\t{ev.swing_ts}\t{ev.level}\t0\t0\t0",
+            f"1\tEURUSD\t15\tult_ob\tOBJ_RECTANGLE\t\t{cs[-30].ts}\t{last.close - 0.0003}\t{last.ts}\t{last.close + 0.0003}\t0",
+            f"1\tEURUSD\t15\tult_obt\tOBJ_TEXT\tORDER BLOCK\t{cs[-30].ts}\t{last.close}\t0\t0\t0",
+            f"1\tEURUSD\t15\tult_liq\tOBJ_TEXT\tM15 · M30\t{cs[-50].ts}\t{last.close + 0.002}\t0\t0\t0",
+            f"1\tEURUSD\t15\tult_poc\tOBJ_TEXT\tPOC\t{cs[-50].ts}\t{last.close}\t0\t0\t0",
+            "1\tEURUSD\t15\tpainel\tOBJ_TEXT\tULTRON: DESLIGADO\t0\t0\t0\t0\t0"]
+    (tmp_path / "objects.tsv").write_bytes("\r\n".join(rows).encode("utf-16"))
+    (tmp_path / "charts.tsv").write_bytes("chart\tsymbol\tperiod\tindicators\r\n1\tEURUSD\t15\tULTRON|TIO_Exportador|".encode("utf-16"))
+    exp = mo.read_export(tmp_path)
+    assert exp["charts"][0]["indicators"][0] == "ULTRON"
+    objs = exp["objects"][("EURUSD", "M15")]
+    atr = st.last_atr(cs)
+    mk = mo.classify(objs, cs, atr)
+    assert mk["events"] and mk["events"][0]["dir"] == ev.direction
+    assert any(z["kind"] == "OB" for z in mk["zones"])
+    assert any(lv["kind"] == "MTF" for lv in mk["levels"]) and any(lv["kind"] == "POC" for lv in mk["levels"])
+    office = {"events": [{"kind": ev.kind, "dir": ev.direction, "level": ev.level, "ts": ev.ts}], "zones": [], "levels": [], "poc": last.close}
+    cmp = mo.compare(mk, office, atr, 900)
+    assert cmp["by_kind"]["BOS/CHoCH"]["matched"] == 1 and cmp["by_kind"]["POC"]["matched"] == 1
+    # o agente 13 passa a usar as marcações do indicador
+    d.chart_objects, d.chart_indicators = {"M15": objs}, ["ULTRON"]
+    res = Office().meet(d.context(None, None, None, ModelParams()))
+    r = next(x for x in res["reports"] if x["agent"] == "MT5I")
+    assert r["data"]["marks"]["indicator"] == "ULTRON" and not r["abstain"]
+    assert any(e["kind"] == "user_mark_zone" for e in r["evidence"])

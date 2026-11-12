@@ -50,6 +50,15 @@ configuráveis na aba Treinamento.
   O **modo estudo** amplia a amostra (confluência MÉDIA também vira ticket de estudo) e compara base e candidatos no
   mesmo regime; regras aprovadas passam a valer na produção.
 
+### Seu indicador do MT5 desenha BOS, CHoCH, FVG, Order Block, Liquidez?
+
+Indicadores de Smart Money costumam **desenhar objetos** (textos, caixas, linhas) em vez de buffers. O TIO_Exportador
+(v1.10) grava os objetos de **todos os gráficos abertos** e a lista de indicadores de cada gráfico. O escritório reconhece
+BOS, CHoCH, FVG, Order Block, EQH/EQL, Liquidez, Strong/Weak High/Low, POC, Fibonacci com preço e rótulos multi-TF
+("M15 · M30", "M30 · H1", "H1 · H4"); a Nina (agente 13) usa essas marcações como evidência e o painel mostra a
+**Conferência**: quantas marcações do seu indicador o escritório também detectou. No gráfico do Painel, as marcações do
+escritório seguem o mesmo estilo e as do seu indicador aparecem com ★ amarelo.
+
 ### Agente 16 · Henrique, Pesquisador (aba Pesquisa)
 
 * Pesquisa **vídeos-aula** (YouTube Data API — chave gratuita, configurável na aba), artigos da **Wikipédia** sobre

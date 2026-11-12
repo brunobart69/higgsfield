@@ -8,7 +8,7 @@
 //| (Files\TIO), de onde o escritorio os le.                         |
 //+------------------------------------------------------------------+
 #property copyright   "AI Trading Intelligence Office"
-#property version     "1.00"
+#property version     "1.10"
 #property description "Exporta indicadores para o AI Trading Intelligence Office. Nao envia ordens."
 
 input int IntervaloSegundos = 5;    // frequencia de exportacao (s)
@@ -189,8 +189,82 @@ void ExportOne(int k, string sym, ENUM_TIMEFRAMES tf, string tfn, string ind)
      }
   }
 
+string Clean(string s)
+  {
+   string r = s;
+   StringReplace(r, "\t", " ");
+   StringReplace(r, "\r", " ");
+   StringReplace(r, "\n", " ");
+   return r;
+  }
+
+// Exporta os OBJETOS desenhados em todos os gráficos abertos (BOS, CHoCH, FVG, Order Block, Liquidez, POC...)
+// e a lista de indicadores de cada gráfico. Somente leitura: nada é criado, alterado ou apagado.
+void ExportObjects()
+  {
+   int fh = FileOpen("TIO\\objects.tsv", FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_UNICODE);
+   int ch_h = FileOpen("TIO\\charts.tsv", FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_UNICODE);
+   if(fh == INVALID_HANDLE || ch_h == INVALID_HANDLE)
+     {
+      if(fh != INVALID_HANDLE) FileClose(fh);
+      if(ch_h != INVALID_HANDLE) FileClose(ch_h);
+      return;
+     }
+   FileWriteString(fh, "chart\tsymbol\tperiod\tname\ttype\ttext\tt1\tp1\tt2\tp2\tcolor\r\n");
+   FileWriteString(ch_h, "chart\tsymbol\tperiod\tindicators\r\n");
+   long ch = ChartFirst();
+   int guard = 0;
+   while(ch >= 0 && guard < 100)
+     {
+      guard++;
+      string sym = ChartSymbol(ch);
+      int per = (int)ChartPeriod(ch);
+      string inds = "";
+      int wins = (int)ChartGetInteger(ch, CHART_WINDOWS_TOTAL);
+      for(int w = 0; w < wins; w++)
+         for(int j = 0; j < ChartIndicatorsTotal(ch, w); j++)
+            inds += Clean(ChartIndicatorName(ch, w, j)) + "|";
+      FileWriteString(ch_h, IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + inds + "\r\n");
+      int total = ObjectsTotal(ch, -1, -1);
+      int lim = MathMin(total, 3000);
+      for(int i = 0; i < lim; i++)
+        {
+         string name = ObjectName(ch, i, -1, -1);
+         ENUM_OBJECT tp = (ENUM_OBJECT)ObjectGetInteger(ch, name, OBJPROP_TYPE);
+         if(tp == OBJ_LABEL || tp == OBJ_BUTTON || tp == OBJ_RECTANGLE_LABEL || tp == OBJ_EDIT || tp == OBJ_BITMAP_LABEL)
+            continue;   // elementos de painel (coordenadas de tela, sem preço)
+         string text = Clean(ObjectGetString(ch, name, OBJPROP_TEXT));
+         long t1 = ObjectGetInteger(ch, name, OBJPROP_TIME, 0);
+         double p1 = ObjectGetDouble(ch, name, OBJPROP_PRICE, 0);
+         long t2 = 0;
+         double p2 = 0;
+         if(tp == OBJ_RECTANGLE || tp == OBJ_TREND || tp == OBJ_FIBO || tp == OBJ_ARROWED_LINE || tp == OBJ_CHANNEL)
+           {
+            t2 = ObjectGetInteger(ch, name, OBJPROP_TIME, 1);     // segundo ponto de ancoragem
+            p2 = ObjectGetDouble(ch, name, OBJPROP_PRICE, 1);
+           }
+         long clr = ObjectGetInteger(ch, name, OBJPROP_COLOR);
+         string lvls = "";
+         if(tp == OBJ_FIBO)
+           {
+            int nl = (int)ObjectGetInteger(ch, name, OBJPROP_LEVELS);
+            for(int k2 = 0; k2 < nl; k2++)
+               lvls += DoubleToString(ObjectGetDouble(ch, name, OBJPROP_LEVELVALUE, k2), 3) + " ";
+            text = text + " FIBO[" + lvls + "]";
+           }
+         FileWriteString(fh, IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + Clean(name) + "\t" +
+                         EnumToString(tp) + "\t" + text + "\t" + IntegerToString(t1) + "\t" + DoubleToString(p1, 8) + "\t" +
+                         IntegerToString(t2) + "\t" + DoubleToString(p2, 8) + "\t" + IntegerToString(clr) + "\r\n");
+        }
+      ch = ChartNext(ch);
+     }
+   FileClose(fh);
+   FileClose(ch_h);
+  }
+
 void ExportAll()
   {
+   ExportObjects();
    int nt = ArraySize(g_tf);
    int k = 0;
    for(int s = 0; s < ArraySize(g_sym); s++)

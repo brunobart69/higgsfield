@@ -107,6 +107,7 @@ class StructureEvent:
     kind: str       # "BOS" ou "CHOCH"
     direction: int  # +1 / -1
     level: float
+    swing_ts: int = 0   # pivô rompido (início da linha desenhada)
 
 
 @dataclass
@@ -139,12 +140,12 @@ def market_structure(candles: list[Candle], sw: list[Swing], right: int = 3) -> 
             pi += 1
         if st.last_high and broken_h is not st.last_high and c.close > st.last_high.price:
             kind = "CHOCH" if st.trend == -1 else "BOS"
-            st.events.append(StructureEvent(i, c.ts, kind, 1, st.last_high.price))
+            st.events.append(StructureEvent(i, c.ts, kind, 1, st.last_high.price, st.last_high.ts))
             st.trend = 1
             broken_h = st.last_high
         elif st.last_low and broken_l is not st.last_low and c.close < st.last_low.price:
             kind = "CHOCH" if st.trend == 1 else "BOS"
-            st.events.append(StructureEvent(i, c.ts, kind, -1, st.last_low.price))
+            st.events.append(StructureEvent(i, c.ts, kind, -1, st.last_low.price, st.last_low.ts))
             st.trend = -1
             broken_l = st.last_low
     highs = [s for s in sw if s.kind == "H"][-3:]

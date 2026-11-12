@@ -27,6 +27,8 @@ class MarketData:
         self.synthetic = base.synthetic
         self.volume_kind = base.volume_kind
         self.indicators: dict = {}   # exportações de indicadores do usuário (MT5): (nome, tf) -> IndicatorExport
+        self.chart_objects: dict = {}  # marcações desenhadas no MT5: tf -> [objetos]
+        self.chart_indicators: list = []  # indicadores aplicados nos gráficos desse ativo
         self.tf: dict[str, list[Candle]] = {self.base_tf: base.candles}
         base_sec = TF_SECONDS[self.base_tf]
         extra = extra or {}
