@@ -161,7 +161,7 @@ def test_mt5_provider_with_fake_terminal(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
     from tio.data.providers import MT5Provider
-    p = MT5Provider()
+    p = MT5Provider(module=fake)
     s = p.load("EURUSD", "M15")
     assert calls == ["EURUSDm"]
     assert s.candles[0].ts == start and s.volume_kind == "tick"
@@ -205,7 +205,7 @@ def test_mt5_user_indicators_flow(monkeypatch, tmp_path):
     monkeypatch.setattr(mi, "CONFIG_PATH", tmp_path / "cfg.json")
     from tio.data.providers import MT5Provider
     from tio.service import OfficeService
-    p = MT5Provider()
+    p = MT5Provider(module=fake)
     for _ in range(50):   # a instalação do exportador roda em segundo plano
         if (data_dir / "MQL5" / "Experts" / "TIO_Exportador.mq5").exists():
             break
@@ -386,3 +386,37 @@ def test_user_chart_marks_are_read_and_compared(tmp_path):
     r = next(x for x in res["reports"] if x["agent"] == "MT5I")
     assert r["data"]["marks"]["indicator"] == "ULTRON" and not r["abstain"]
     assert any(e["kind"] == "user_mark_zone" for e in r["evidence"])
+
+
+
+def _fake_mt5_worker(conn):
+    import time as _t
+    conn.send(("ok", "pronto"))
+    while True:
+        msg = conn.recv()
+        if msg is None:
+            break
+        name, args, kwargs = msg
+        if name == "trava":
+            _t.sleep(30)
+        conn.send(("ok", {"initialize": True, "TIMEFRAME_M1": 1, "dobro": (args[0] * 2) if args else None}.get(name)))
+
+
+def test_mt5_bridge_survives_hangs():
+    """O MT5 roda em outro processo: travamento vira erro com tempo limite e o processo é recriado."""
+    import time as _t
+    from tio.data import mt5_bridge as mb
+    old = dict(mb.SLOW)
+    mb.SLOW["trava"] = 1
+    try:
+        m = mb.ProcessMT5(target=_fake_mt5_worker)
+        assert m.initialize() is True and m.TIMEFRAME_M1 == 1 and m.dobro(21) == 42
+        t0 = _t.time()
+        with pytest.raises(mb.MT5Timeout):
+            m.trava()
+        assert _t.time() - t0 < 10
+        assert m.dobro(5) == 10 and m.restarts == 1      # processo recriado e reconectado
+        m.shutdown_process()
+    finally:
+        mb.SLOW.clear()
+        mb.SLOW.update(old)

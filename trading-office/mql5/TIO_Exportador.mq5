@@ -8,7 +8,7 @@
 //| (Files\TIO), de onde o escritorio os le.                         |
 //+------------------------------------------------------------------+
 #property copyright   "AI Trading Intelligence Office"
-#property version     "1.10"
+#property version     "1.11"
 #property description "Exporta indicadores para o AI Trading Intelligence Office. Nao envia ordens."
 
 input int IntervaloSegundos = 5;    // frequencia de exportacao (s)
@@ -226,7 +226,7 @@ void ExportObjects()
             inds += Clean(ChartIndicatorName(ch, w, j)) + "|";
       FileWriteString(ch_h, IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + inds + "\r\n");
       int total = ObjectsTotal(ch, -1, -1);
-      int lim = MathMin(total, 3000);
+      int lim = MathMin(total, 1500);
       for(int i = 0; i < lim; i++)
         {
          string name = ObjectName(ch, i, -1, -1);
@@ -262,9 +262,13 @@ void ExportObjects()
    FileClose(ch_h);
   }
 
+int g_tick = 0;
+
 void ExportAll()
   {
-   ExportObjects();
+   if(g_tick % 6 == 0)
+      ExportObjects();   // objetos dos gráficos a cada ~30 s (operação mais pesada para o terminal)
+   g_tick++;
    int nt = ArraySize(g_tf);
    int k = 0;
    for(int s = 0; s < ArraySize(g_sym); s++)

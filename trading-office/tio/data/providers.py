@@ -221,23 +221,26 @@ class MT5Provider(Provider):
     name = "mt5"
     native_multi_tf = True
 
-    def __init__(self):
-        try:
-            import MetaTrader5 as mt5  # type: ignore
-        except ImportError as e:
-            raise RuntimeError("Pacote MetaTrader5 não instalado (pip install MetaTrader5; só funciona no Windows).") from e
+    def __init__(self, module=None):
         import threading
-        self.mt5 = _SerializedModule(mt5)   # a biblioteca do MT5 não é segura para chamadas simultâneas
+        from .mt5_bridge import MT5Timeout, ProcessMT5
+        if module is None:
+            try:
+                import MetaTrader5  # noqa: F401  # type: ignore  (verifica a instalação)
+            except ImportError as e:
+                raise RuntimeError("Pacote MetaTrader5 não instalado (pip install MetaTrader5; só funciona no Windows).") from e
+            # o conector roda em OUTRO processo: se o MT5 travar, o site continua respondendo
+            module = ProcessMT5()
+        mt5 = module
+        self.mt5 = _SerializedModule(mt5)
         print(" · MT5: conectando ao terminal aberto…", flush=True)
-        res: dict = {}
-        th = threading.Thread(target=lambda: res.setdefault("ok", mt5.initialize()), daemon=True)
-        th.start()
-        th.join(40)
-        if th.is_alive():
-            raise RuntimeError("O MetaTrader 5 não respondeu em 40 segundos. Verifique: (1) o MT5 está aberto e logado; "
-                               "(2) não há nenhuma janela de aviso/atualização aberta dentro do MT5; (3) se houver mais de um "
-                               "MT5 instalado, deixe aberto só o da sua corretora. Depois feche esta janela e abra de novo.")
-        if not res.get("ok"):
+        try:
+            ok = mt5.initialize()
+        except MT5Timeout:
+            raise RuntimeError("O MetaTrader 5 não respondeu. Verifique: (1) o MT5 está aberto e logado; (2) não há janela de "
+                               "aviso/atualização aberta dentro do MT5; (3) se houver mais de um MT5 instalado, deixe aberto só "
+                               "o da sua corretora. Depois feche esta janela e abra de novo.")
+        if not ok:
             raise RuntimeError(f"Não consegui conectar ao MetaTrader 5 aberto: {mt5.last_error()}")
         print(" · MT5: conectado", flush=True)
         self.TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
@@ -402,11 +405,17 @@ class MT5Provider(Provider):
             self._offset = int(round((tick.time - now) / 1800) * 1800) if tick and abs(tick.time - now) < 15 * 3600 else 0
         return self._offset
 
+    COUNT = {"MN": 120, "W1": 260, "D1": 500, "H4": 1500, "H1": 3000}   # menos histórico nas TFs longas (carrega mais rápido)
+
     def load(self, asset: str, tf: str, count: int = 6000) -> Optional[Series]:
         sym = self.symbol(asset)
         if sym is None or tf not in self.TF:
             return None
-        rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, count)
+        try:
+            rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, min(count, self.COUNT.get(tf, count)))
+        except Exception as e:
+            print(f" · MT5: {asset} {tf} indisponível ({e})", flush=True)
+            return None
         if rates is None or len(rates) == 0:
             return None
         off = self.server_offset(sym)
