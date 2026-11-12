@@ -4,7 +4,7 @@ from __future__ import annotations
 from .. import indicators as ind
 from ..context import MarketContext
 from ..data.news import IMPACT_PT, IMPACT_RANK
-from ..models import BEAR, BULL, NEUTRAL, DIR_LABEL, TIMEFRAMES, TF_LABEL, TF_SECONDS, AgentReport, fmt_ts
+from ..models import BEAR, BULL, NEUTRAL, DIR_LABEL, TIMEFRAMES, TF_LABEL, TF_SECONDS, AgentReport, bucket_end, bucket_start, fmt_ts
 from .base import Agent
 
 
@@ -453,12 +453,15 @@ class SupportResistanceAgent(Agent):
 # =========================================================================== 08
 class FibonacciAgent(Agent):
     code, number, name, group = "FIB", 8, "Fibonacci Intelligence", "fib"
-    specialty = "Retrações e expansões em 4 categorias: Diamante, Ouro, Prata, Bronze"
-    personality = "Geômetra: só valoriza níveis que coincidem entre temporalidades."
-    methodology = ("DIAMANTE = último ano fechado; OURO = último mês fechado; PRATA = última semana fechada; "
-                   "BRONZE = última perna confirmada em H4. Níveis só mudam após o fechamento do candle de referência.")
+    specialty = "Taxa OURO (mensal), Taxa PRATA (semanal), Diamante (anual) e Bronze (H4)"
+    personality = "Geômetra: só valoriza níveis que coincidem entre temporalidades e nunca move uma âncora."
+    methodology = ("TAXA OURO = máxima/mínima da última vela MENSAL fechada; TAXA PRATA = da última vela SEMANAL fechada; "
+                   "níveis traçados dentro da própria vela, vinculados a ela e gravados na memória no momento do "
+                   "fechamento (nunca alterados retroativamente). DIAMANTE = ano fechado; BRONZE = última perna H4. "
+                   "Fibonacci sozinho nunca autoriza entrada: perto de uma Taxa, todos os especialistas são acionados.")
 
     CATS = [("DIAMANTE", "Y1"), ("OURO", "MN"), ("PRATA", "W1"), ("BRONZE", "H4")]
+    LABEL = {"OURO": "TAXA OURO (MENSAL)", "PRATA": "TAXA PRATA (SEMANAL)", "DIAMANTE": "DIAMANTE (ANUAL)", "BRONZE": "BRONZE (H4)"}
 
     def analyze(self, ctx: MarketContext) -> AgentReport:
         rep = self.new_report(ctx)
@@ -477,16 +480,19 @@ class FibonacciAgent(Agent):
                     continue
                 a, b, d = lg
                 lo, hi = (a.price, b.price) if d == 1 else (b.price, a.price)
-                ref = f"perna H4 {fmt_ts(a.ts)} → {fmt_ts(b.ts)}"
+                ref, ref_ts = f"perna H4 {fmt_ts(a.ts)} → {fmt_ts(b.ts)}", b.ts
             else:
                 if not cs:
                     cats[name] = None
                     continue
                 c = cs[-1]  # último candle FECHADO da referência
                 lo, hi, d = c.low, c.high, (1 if c.close >= c.open else -1)
-                ref = f"candle {TF_LABEL[tf]} fechado em {fmt_ts(c.close_ts)}"
-            cats[name] = {"tf": tf, "low": lo, "high": hi, "dir": d, "ref": ref,
-                          "levels": ind.fib_levels(lo, hi, d)}
+                ref, ref_ts = f"vela {TF_LABEL[tf].lower()} {fmt_ts(c.ts)[:10]} (fechada em {fmt_ts(c.close_ts)})", c.ts
+                if ctx.memory is not None and hasattr(ctx.memory, "fib_anchor"):
+                    # âncora gravada no primeiro uso; leituras seguintes usam o valor gravado (sem alteração retroativa)
+                    lo, hi, d = ctx.memory.fib_anchor(ctx.asset, tf, ref_ts, lo, hi, d)
+            cats[name] = {"tf": tf, "low": lo, "high": hi, "dir": d, "ref": ref, "ref_ts": ref_ts,
+                          "label": self.LABEL[name], "levels": ind.fib_levels(lo, hi, d)}
         rep.data["categories"] = cats
         missing = [k for k, v in cats.items() if v is None]
         if missing:
@@ -502,7 +508,7 @@ class FibonacciAgent(Agent):
             for lvl, val in c["levels"].items():
                 if not lvl.startswith("ext") and abs(val - price) <= tol:
                     near.append((name, lvl, val, c["dir"]))
-        rep.data["near_levels"] = [{"cat": n, "level": l, "price": v} for n, l, v, _ in near]
+        rep.data["near_levels"] = [{"cat": n, "level": l, "price": v, "label": self.LABEL[n]} for n, l, v, _ in near]
         if near:
             cats_hit = sorted({n for n, *_ in near})
             dirs = [d for *_, d in near]
@@ -510,12 +516,19 @@ class FibonacciAgent(Agent):
             golden = any(l in ("0.618", "0.705", "0.500") for _, l, _, _ in near)
             q = min(1.0, 0.35 + 0.2 * len(cats_hit) + (0.15 if golden else 0))
             w = {"DIAMANTE": 0.8, "OURO": 0.7, "PRATA": 0.6, "BRONZE": 0.5}[max(cats_hit, key=lambda n: ["BRONZE", "PRATA", "OURO", "DIAMANTE"].index(n))]
-            txt = ", ".join(f"{n} {l}" for n, l, _, _ in near[:4])
+            txt = ", ".join(f"{self.LABEL[n]} {l}" for n, l, _, _ in near[:4])
             if d != NEUTRAL:
                 self.ev(rep, "fib_confluence", f"Preço em nível(is) de Fibonacci: {txt}"
                                                f"{' — sobreposição entre categorias' if len(cats_hit) > 1 else ''}", d, w, q, "H1")
             else:
                 rep.warnings.append(f"Níveis de Fibonacci com sinais opostos: {txt}")
+        # ---- alerta de Taxa OURO / PRATA: cenário na região (continuação, reversão, rejeição, rompimento, ausência)
+        taxa = [(n, l, v) for n, l, v, _ in near if n in ("OURO", "PRATA")]
+        if taxa:
+            n, l, v = min(taxa, key=lambda x: abs(x[2] - price))
+            rep.data["taxa_alert"] = self.taxa_scenario(ctx, n, l, v)
+            rep.warnings.insert(0, f"Preço na {self.LABEL[n]} {l} ({_fmt(v)}): {rep.data['taxa_alert']['scenario']}. "
+                                   "Fibonacci isolado não autoriza entrada.")
         tgt = []
         for name, c in cats.items():
             if c:
@@ -524,6 +537,35 @@ class FibonacciAgent(Agent):
                         tgt.append({"cat": name, "level": lvl, "price": val, "dist_atr": round((val - price) / atr, 1)})
         rep.data["targets"] = sorted(tgt, key=lambda t: abs(t["dist_atr"]))[:6]
         return rep
+
+    def taxa_scenario(self, ctx: MarketContext, name: str, level: str, value: float) -> dict:
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf) or []
+        a = ctx.atr(tf) or 1e-9
+        last3 = cs[-3:]
+        side = [1 if c.close > value + 0.15 * a else -1 if c.close < value - 0.15 * a else 0 for c in cs[-8:]]
+        react = 0
+        scenario = "ausência de confirmação"
+        if len(side) >= 3 and side[-1] == side[-2] != 0 and any(s == -side[-1] for s in side[:-2]):
+            react = side[-1]
+            scenario = f"rompimento confirmado para {'cima' if react > 0 else 'baixo'} (2 fechamentos além da região)"
+        elif last3:
+            c = last3[-1]
+            if c.low < value < c.close and ind.wick_rejection(c) == 1:
+                react, scenario = 1, "rejeição da região (pavio inferior, fechou acima)"
+            elif c.close < value < c.high and ind.wick_rejection(c) == -1:
+                react, scenario = -1, "rejeição da região (pavio superior, fechou abaixo)"
+        trend = 0
+        for t in ("M5", "H1"):
+            if ctx.enough(t, 60):
+                trend = ctx.structure(t).trend or trend
+                if trend:
+                    break
+        if react and trend:
+            scenario += "; possibilidade de " + ("continuação" if react == trend else "reversão") + \
+                        f" (tendência {'M5' if ctx.enough('M5', 60) else 'H1'} de {DIR_LABEL[trend]})"
+        return {"taxa": name, "label": self.LABEL[name], "level": level, "price": value, "reaction": react,
+                "scenario": scenario, "relevant_agents": ["MTF", "LIQ", "SR", "VOL", "VP", "PA", "TIM"]}
 
 
 # =========================================================================== 09
@@ -773,5 +815,129 @@ class TrendlineAgent(Agent):
         return rep
 
 
+# =========================================================================== 15
+class TimingAgent(Agent):
+    code, number, name, group = "TIM", 15, "Timing & Micro-estrutura M1", "timing"
+    specialty = "Pressão compradora/vendedora, velocidade, rompimentos curtos e espaço até a expiração"
+    personality = "Cronometrista: pergunta sempre se o preço tem ESPAÇO e TEMPO para chegar lá antes da expiração."
+    methodology = ("Lê as velas M1 FECHADAS: posição do fechamento no range, corpo × pavios, sequência, velocidade, "
+                   "rompimentos e falsos rompimentos, varreduras curtas, retrações curtas e exaustão. Uma vela verde "
+                   "ou vermelha nunca é confirmação sozinha: exige ao menos 2 fatos independentes no mesmo sentido. "
+                   "Mede o espaço até o obstáculo mais próximo (S/R, liquidez, Taxa Ouro/Prata, POC) contra o "
+                   "movimento esperado até a expiração (ATR M1 × √minutos restantes).")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        if ctx.focus_tf not in ("M1", "M5") or not ctx.enough("M1", 40):
+            rep.abstain = True
+            rep.summary = "Atuo em operações M1/M5 e preciso de velas M1."
+            return rep
+        cs = ctx.candles("M1")
+        a1 = ctx.atr("M1") or 1e-9
+        ticket = getattr(ctx, "ticket", None) or {}
+        expiry = ticket.get("expiry_ts") or bucket_end(bucket_start(ctx.as_of, ctx.focus_tf), ctx.focus_tf)
+        if expiry <= ctx.as_of:
+            expiry = ctx.as_of + TF_SECONDS[ctx.focus_tf]
+        entry = ticket.get("entry_ts") or ctx.as_of
+        remaining = max(1, expiry - entry)
+        facts = {BULL: [], BEAR: []}
+        last = cs[-1]
+        rng = last.range or 1e-9
+        pos = (last.close - last.low) / rng
+        if last.body >= 0.5 * rng and pos >= 0.7:
+            facts[BULL].append(f"fechamento no topo do range ({pos:.0%}) com corpo forte")
+        elif last.body >= 0.5 * rng and pos <= 0.3:
+            facts[BEAR].append(f"fechamento no fundo do range ({pos:.0%}) com corpo forte")
+        dirs = [1 if c.close > c.open else -1 if c.close < c.open else 0 for c in cs[-6:]]
+        run = 0
+        for d in reversed(dirs):
+            if d == dirs[-1] and d != 0:
+                run += 1
+            else:
+                break
+        if 3 <= run <= 4:
+            facts[dirs[-1]].append(f"{run} velas M1 seguidas no mesmo sentido")
+        vel = (cs[-1].close - cs[-4].close) / a1
+        if abs(vel) >= 1.2:
+            facts[BULL if vel > 0 else BEAR].append(f"velocidade de {abs(vel):.1f} ATR em 3 minutos")
+        rj = ind.wick_rejection(last)
+        if rj:
+            facts[rj].append("pavio de rejeição na última vela M1")
+        hi15 = max(c.high for c in cs[-16:-1])
+        lo15 = min(c.low for c in cs[-16:-1])
+        if last.close > hi15:
+            facts[BULL].append(f"rompimento da máxima de 15 min ({_fmt(hi15)}) por fechamento")
+        elif last.close < lo15:
+            facts[BEAR].append(f"rompimento da mínima de 15 min ({_fmt(lo15)}) por fechamento")
+        elif last.high > hi15 and last.close < hi15:
+            facts[BEAR].append(f"falso rompimento da máxima de 15 min ({_fmt(hi15)})")
+        elif last.low < lo15 and last.close > lo15:
+            facts[BULL].append(f"falso rompimento da mínima de 15 min ({_fmt(lo15)})")
+        for s in ind.detect_sweeps(cs, ctx.pools("M1"), 2):
+            facts[s.direction].append(f"varredura curta de liquidez em {_fmt(s.level)}")
+            break
+        # retração curta após impulso: impulso nas velas -5..-3, 1-2 velas pequenas contrárias, retomada na última
+        imp = (cs[-3].close - cs[-6].close) / a1
+        if abs(imp) >= 1.2:
+            d = 1 if imp > 0 else -1
+            small = all(abs(c.close - c.open) < 0.45 * a1 and (c.close - c.open) * d <= 0 for c in cs[-3:-1])
+            if small and (last.close - last.open) * d > 0:
+                facts[d].append("retração curta após impulso e retomada")
+        r = ctx.rsi("M1")
+        exhaustion = None
+        if run >= 6 or abs(vel) >= 2.6 or (r[-1] is not None and (r[-1] >= 78 or r[-1] <= 22)):
+            exhaustion = BULL if (vel > 0 or (r[-1] or 50) >= 78) else BEAR
+            rep.warnings.append(f"Possível exaustão do movimento de {DIR_LABEL[exhaustion]} no M1 "
+                                f"(sequência {run}, velocidade {vel:+.1f} ATR, RSI {r[-1] or 0:.0f}).")
+        if ctx.data.volume_kind != "none":
+            v = [c.volume for c in cs[-21:]]
+            ratio = v[-1] / (sum(v[:-1]) / 20) if sum(v[:-1]) else 1
+            rep.data["volume_ratio_m1"] = round(ratio, 2)
+            if ratio >= 1.4 and dirs[-1]:
+                facts[dirs[-1]].append(f"tick volume {ratio:.1f}× a média na última vela")
+        rep.data["facts"] = {DIR_LABEL[k]: v for k, v in facts.items()}
+        # direção só com >= 2 fatos independentes (vela colorida sozinha não confirma)
+        for d in (BULL, BEAR):
+            f = facts[d]
+            if len(f) >= 2 and len(f) > len(facts[-d]):
+                q = min(1.0, 0.35 + 0.15 * len(f)) * (0.6 if exhaustion == d else 1.0)
+                self.ev(rep, "m1_pressure", f"Pressão de {DIR_LABEL[d]} no M1: " + "; ".join(f[:4]), d, 0.55, q, "M1")
+        if not rep.evidence and (facts[BULL] or facts[BEAR]):
+            rep.warnings.append("Sinais de M1 isolados ou contraditórios — insuficiente para confirmar direção.")
+        # espaço até a expiração
+        exp_move = a1 * (remaining / 60) ** 0.5
+        rep.data.update({"remaining_s": remaining, "expected_move": exp_move, "expiry_ts": expiry})
+        price = last.close
+        obstacles = []
+        for tf in ("M5", "H1"):
+            if ctx.enough(tf, 60):
+                for z in ctx.zones(tf):
+                    if z.touches >= 2:
+                        obstacles.append((z.low if z.low > price else z.high, f"zona S/R {tf}"))
+        for p in ctx.pools("M1"):
+            if not p.swept:
+                obstacles.append((p.price, f"liquidez M1 ({'acima' if p.price > price else 'abaixo'})"))
+        fib = getattr(ctx, "_fib_taxas", None)
+        if fib:
+            obstacles += fib
+        vp = ctx.profile(ctx.focus_tf)
+        if vp:
+            obstacles.append((vp.poc, f"POC {ctx.focus_tf}"))
+        rep.data["room"] = {}
+        for d in (BULL, BEAR):
+            ahead = [(abs(v - price), nm) for v, nm in obstacles if (v - price) * d > 0.05 * a1]
+            if not ahead:
+                continue
+            dist, nm = min(ahead)
+            ratio = dist / exp_move if exp_move else 9
+            rep.data["room"][DIR_LABEL[d]] = {"obstacle": nm, "dist": dist, "ratio": round(ratio, 2)}
+            if ratio < 0.6 and any(e.direction == d for e in rep.evidence):
+                self.ev(rep, "no_room", f"Pouco espaço para {DIR_LABEL[d]}: {nm} a {dist / a1:.1f} ATR M1, "
+                                        f"menor que o movimento esperado até a expiração ({remaining}s)", -d, 0.4, 0.6, "M1")
+        if not rep.evidence:
+            rep.summary = f"Sem pressão clara no M1 ({remaining}s até a expiração)."
+        return rep
+
+
 SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
-               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent]
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent, TimingAgent]

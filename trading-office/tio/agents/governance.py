@@ -81,10 +81,83 @@ class RiskManager(Agent):
                 + ("dentro do filtro de horário." if hour in p.allowed_hours else "FORA do filtro de horário escolhido."))
         if draft.get("news_avoid"):
             chk(False, "Evento de alto impacto na janela: operação vetada.")
+        tfc = draft.get("tf_compare")
+        if tfc and p.require_tf_agreement and tfc.get("applies"):
+            chk(tfc["ok"], f"Comparação M1×M5: {tfc['text']}")
+        for ok, text in self.prevention_checks(ctx, draft):
+            chk(ok, text)
         if ctx.data.synthetic:
             checks.append({"ok": True, "blocking": False,
                            "text": "ATENÇÃO: dados SINTÉTICOS. Resultado não tem qualquer validade de mercado."})
         return {"approved": approved, "checks": checks, "breakeven": breakeven}
+
+
+    @staticmethod
+    def prevention_checks(ctx: MarketContext, draft: dict) -> list[tuple[bool, str]]:
+        """Regras de prevenção nascidas do Loss Analyzer. Só atuam quando ativadas e validadas fora da amostra."""
+        p = ctx.params
+        d = draft["confluence"].get("direction", 0)
+        crit = draft["confluence"].get("criteria", [])
+        reps = draft.get("reports") or {}
+        out = []
+        sup = [e for r in reps.values() for e in r.evidence if e.direction == d]
+        mtf = (reps.get("MTF").data.get("map") or {}) if reps.get("MTF") else {}
+        ctx_tf = "M5" if ctx.focus_tf == "M1" else "H1" if ctx.focus_tf in ("M5", "M15") else "H4"
+        if p.require_htf_alignment:
+            t = (mtf.get(ctx_tf) or {}).get("trend")
+            out.append((t != -d, f"Prevenção: tendência {ctx_tf} {'contra' if t == -d else 'não contra'} a entrada."))
+        if p.block_consolidation:
+            lab = (mtf.get(ctx.focus_tf) or {}).get("label")
+            eff = reps.get("PA").data.get("efficiency") if reps.get("PA") else None
+            cons = lab == "CONSOLIDAÇÃO" or (eff is not None and eff < 0.15)
+            out.append((not cons, "Prevenção: mercado em consolidação." if cons else "Prevenção: fora de consolidação."))
+        tim = reps.get("TIM")
+        if p.require_lower_tf_confirmation:
+            ok = bool(tim and tim.bias == d)
+            out.append((ok, f"Prevenção: pressão M1 {'confirma' if ok else 'NÃO confirma'} a direção."))
+        if p.block_exhaustion_rsi and reps.get("TIM"):
+            r = ctx.rsi("M1")[-1] if ctx.enough("M1", 30) else None
+            ex = r is not None and ((d > 0 and r >= p.block_exhaustion_rsi) or (d < 0 and r <= 100 - p.block_exhaustion_rsi))
+            out.append((not ex, f"Prevenção: RSI M1 {r or 0:.0f} {'indica exaustão' if ex else 'sem exaustão'}."))
+        if p.max_premove_atr and ctx.enough("M1", 20):
+            cs = ctx.candles("M1")
+            a = ctx.atr("M1") or 1e-9
+            pre = (cs[-1].close - cs[-3].open) * d / a
+            out.append((pre <= p.max_premove_atr, f"Prevenção: movimento já percorrido {pre:.1f} ATR M1 (máx. {p.max_premove_atr})."))
+        if p.liquidity_buffer_atr and reps.get("LIQ"):
+            pools = reps["LIQ"].data.get("pools") or []
+            near = [x for x in pools if x.get("dist_atr") is not None and x["dist_atr"] * d < 0 and abs(x["dist_atr"]) < p.liquidity_buffer_atr]
+            out.append((not near, "Prevenção: liquidez não varrida contra a entrada a menos de "
+                                  f"{p.liquidity_buffer_atr} ATR." if near else "Prevenção: sem liquidez próxima contra a entrada."))
+        if p.breakout_confirm_closes > 1:
+            weak = [e for e in sup if e.kind in ("breakout", "breakdown", "tl_break")]
+            if weak:
+                cs = ctx.candles(ctx.focus_tf) or []
+                same = sum(1 for c in cs[-p.breakout_confirm_closes:] if (c.close - c.open) * d > 0)
+                out.append((same >= p.breakout_confirm_closes, f"Prevenção: rompimento com {same} fechamento(s) a favor "
+                                                               f"(exige {p.breakout_confirm_closes})."))
+        if p.reversal_requires_choch and any(e.group == "reversal" for e in sup):
+            ok = any("CHOCH" in e.description for e in sup)
+            out.append((ok, "Prevenção: reversão " + ("com" if ok else "SEM") + " CHOCH confirmado."))
+        if p.fib_requires_reaction and any(e.group == "fib" for e in sup):
+            fib = reps.get("FIB")
+            react = (fib.data.get("taxa_alert") or {}).get("reaction") if fib else None
+            ok = react == d or any(e.kind in ("rejection", "tl_touch", "false_break") for e in sup)
+            out.append((ok, "Prevenção: Fibonacci " + ("com" if ok else "SEM") + " reação de preço no nível."))
+        if p.sr_min_reactions and reps.get("SR"):
+            zs = reps["SR"].data.get("zones") or []
+            used = [e for e in sup if e.group == "zones"]
+            ok = not used or any(z["reactions"] >= p.sr_min_reactions for z in zs)
+            out.append((ok, f"Prevenção: zona S/R com ≥{p.sr_min_reactions} reações: {'sim' if ok else 'não'}."))
+        if p.min_volume_ratio and reps.get("VOL") and reps["VOL"].data.get("volume_ratio") is not None:
+            vr = reps["VOL"].data["volume_ratio"]
+            out.append((vr >= p.min_volume_ratio, f"Prevenção: volume {vr:.2f}× a média (mín. {p.min_volume_ratio})."))
+        if p.min_active_agents:
+            n = sum(1 for r in reps.values() if not r.abstain)
+            out.append((n >= p.min_active_agents, f"Prevenção: {n} agentes com dados (mín. {p.min_active_agents})."))
+        if [x for x in crit if x["status"] == "confirma"] and all(x["group"] == "fib" for x in crit if x["status"] == "confirma"):
+            out.append((False, "Fibonacci isolado não autoriza entrada."))
+        return out
 
 
 class HeadTrader(Agent):
@@ -124,6 +197,37 @@ class HeadTrader(Agent):
         score = sum(v for _, v in items) / len(items)
         return {"score": round(score, 3), "items": [{"name": n, "value": round(v, 2)} for n, v in items],
                 "label": "BOM" if score >= 0.65 else "REGULAR" if score >= 0.5 else "FRACO"}
+
+    def compare_tfs(self, ctx: MarketContext, by_code: dict, direction: int) -> dict:
+        """Comparação obrigatória M1 × M5: M5 dá o contexto, M1 dá a confirmação de curto prazo."""
+        if ctx.focus_tf not in ("M1", "M5") or not direction:
+            return {"applies": False, "ok": True, "text": "não se aplica"}
+        mtf = (by_code.get("MTF").data.get("map") or {}) if by_code.get("MTF") else {}
+        m5 = (mtf.get("M5") or {}).get("trend")
+        m5_label = (mtf.get("M5") or {}).get("label") or "sem dados"
+        tim = by_code.get("TIM")
+        m1 = tim.bias if tim and not tim.abstain else None
+        parts, ok = [], True
+        if m5 == -direction:
+            ok = False
+            parts.append(f"M5 em {m5_label}, contra a entrada de {DIR_LABEL[direction]}")
+        else:
+            parts.append(f"M5 em {m5_label}")
+        if ctx.focus_tf == "M5":
+            if m1 == -direction:
+                ok = False
+                parts.append("M1 com pressão contrária")
+            elif m1 != direction:
+                ok = False
+                parts.append("M1 ainda sem confirmação")
+            else:
+                parts.append("M1 confirma")
+        else:
+            parts.append("M1 " + ("confirma" if m1 == direction else "contrário" if m1 == -direction else "neutro"))
+            if m1 == -direction:
+                ok = False
+        return {"applies": True, "ok": ok, "text": "; ".join(parts) + (" → alinhadas." if ok else " → CONFLITO entre temporalidades."),
+                "m5": m5, "m1": m1}
 
     def conclude(self, ctx: MarketContext, reports: list[AgentReport], c: dict, risk: Optional[dict],
                  news_avoid: bool, data_ok: bool) -> tuple[str, str]:

@@ -309,6 +309,29 @@ class MT5Provider(Provider):
         except Exception as e:  # pragma: no cover
             return f"Não consegui abrir automaticamente: {e}"
 
+    def price_at(self, asset: str, ts: int, ref: str = "bid") -> Optional[float]:
+        """Preço da corretora no instante `ts` (UTC): último tick com horário <= ts (bid, ask ou médio)."""
+        sym = self.symbol(asset)
+        if sym is None:
+            return None
+        off = self.server_offset(sym)
+        srv = ts + off
+        frm = dt.datetime.fromtimestamp(srv - 120, dt.timezone.utc).replace(tzinfo=None)
+        to = dt.datetime.fromtimestamp(srv + 1, dt.timezone.utc).replace(tzinfo=None)
+        try:
+            ticks = self.mt5.copy_ticks_range(sym, frm, to, self.mt5.COPY_TICKS_ALL)
+        except Exception:
+            return None
+        if ticks is None or len(ticks) == 0:
+            return None
+        lim = srv * 1000
+        sel = [t for t in ticks if int(t["time_msc"]) <= lim and t["bid"] > 0]
+        if not sel:
+            return None
+        t = sel[-1]
+        bid, ask = float(t["bid"]), float(t["ask"])
+        return ask if ref == "ask" else (bid + ask) / 2 if ref == "mid" else bid
+
     def indicator_store(self, asset: str):
         from .mt5_indicators import IndicatorStore
         sym = self.symbol(asset)

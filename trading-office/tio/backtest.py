@@ -40,71 +40,88 @@ class BTConfig:
     payout: Optional[float] = None
     debate: bool = True
     max_steps: Optional[int] = None
+    rules: Optional[dict] = None      # regras da corretora (BrokerRules); padrão: expira no fechamento da vela
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
 
 
+def _rules_for(cfg: "BTConfig", p: ModelParams) -> binary.BrokerRules:
+    rules = binary.BrokerRules.from_dict(cfg.rules)
+    rules.payout = p.payout
+    if cfg.timeframe not in ("M1", "M5") and not cfg.rules:
+        rules.expiry_mode, rules.expiry_bars = "bars", cfg.expiry_bars   # modo clássico em M15+
+    if p.expiry_bars:
+        rules.expiry_mode, rules.expiry_bars = "bars", p.expiry_bars       # regra de prevenção em teste
+    return rules
+
+
 def run(datasets: dict[str, MarketData], cfg: BTConfig, params: ModelParams, news: Optional[NewsStore] = None,
         model_version: str = "v1.0", memory: Optional[Memory] = None, progress=None) -> dict:
+    """Walk-forward com tickets de opções binárias (entrada/expiração exatas, regras da corretora)."""
     run_id = "bt-" + uuid.uuid4().hex[:8]
     mem = memory or Memory(":memory:", run_id=run_id, mode="backtest")
-    mem.run_id, mem.mode = run_id, "backtest"
+    mem.run_id, mem.mode = run_id, mem.mode if memory is not None else "backtest"
     p = params.copy()
     if cfg.payout is not None:
         p.payout = cfg.payout
+    rules = _rules_for(cfg, p)
     office = Office(agents=cfg.agents, strategy=cfg.strategy)
     trades: list[dict] = []
     decisions_count = defaultdict(int)
     abstentions = {"correct": 0, "total": 0}
     t0 = time.time()
     steps_done = 0
+    tf = cfg.timeframe
     for asset, data in datasets.items():
-        base = data.base
-        open_ts = [c.ts for c in base]
-        close_ts = [c.close_ts for c in base]
+        base = data.base                         # série de decisão (M1 para mesas M1/M5)
+        path = binary.PricePath(data.tf.get("M1") or base)
         n = len(base)
         i0 = max(cfg.warmup, int(n * cfg.start_frac))
-        i1 = min(n - cfg.expiry_bars - 1, int(n * cfg.end_frac))
+        i1 = min(n - 2, int(n * cfg.end_frac))
         pending: list[dict] = []
         busy_until = 0
         for i in range(i0, i1, cfg.step):
             as_of = base[i].close_ts
-            # 1) resolve pendências cuja expiração já ocorreu (conhecimento passa a existir agora)
+            # 1) resolve pendências cuja expiração já ocorreu (o conhecimento só passa a existir agora)
             still = []
             for pd in pending:
                 if pd["expiry_ts"] <= as_of:
-                    out = binary.settle(base, open_ts, close_ts, pd["direction"] or pd["lean"] or 1, pd["entry_ts"],
-                                        pd["expiry_ts"], p.payout)
-                    if out is None:
-                        continue
-                    _resolve(mem, pd, out, trades, abstentions)
+                    out = binary.settle_ticket(path, pd, rules)
+                    if out and not out.get("void"):
+                        _resolve(mem, pd, out, trades, abstentions, data, news)
                 else:
                     still.append(pd)
             pending = still
-            # 2) reunião com dados até as_of
-            ctx = data.context(as_of, news, mem, p)
+            # 2) janela útil do ticket (M5: só entra se restar tempo mínimo na vela)
+            probe = binary.plan_ticket({"asset": asset, "as_of": as_of, "direction": 1, "synthetic": data.synthetic,
+                                        "confluence": {"score": 0, "classification": ""}, "process": {"score": 0}},
+                                       tf, rules)
+            if not probe["ok"]:
+                continue
+            # 3) reunião com dados até as_of
+            ctx = data.context(as_of, news, mem, p, focus_tf=tf)
+            ctx.ticket = {"entry_ts": probe["entry_ts"], "expiry_ts": probe["expiry_ts"], "tf": tf}
             res = office.meet(ctx, model_version, debate=cfg.debate)
             decisions_count[res["decision"]] += 1
             did = mem.record_decision(res, office.strategy)
-            plan = binary.plan_trade(res, base, cfg.timeframe, cfg.expiry_bars, p.payout, office.strategy)
-            if plan and as_of >= busy_until:
-                tid = mem.open_trade(did, plan)
-                pending.append({**plan, "decision": res, "decision_id": did, "trade_id": tid, "lean": res["lean"]})
-                busy_until = plan["expiry_ts"]
+            if res["direction"] and as_of >= busy_until:
+                t = binary.plan_ticket(res, tf, rules, strategy=office.strategy)
+                tid = mem.open_trade(did, t)
+                pending.append({**t, "decision": res, "decision_id": did, "trade_id": tid, "lean": res["lean"]})
+                busy_until = t["expiry_ts"]
             else:
-                expiry = as_of + cfg.expiry_bars * TF_SECONDS[cfg.timeframe]
-                pending.append({"asset": asset, "direction": 0, "lean": res["lean"], "entry_ts": as_of, "expiry_ts": expiry,
-                                "decision": res, "decision_id": did, "trade_id": None})
+                pending.append({**probe, "asset": asset, "direction": res["lean"], "shadow": True, "decision": res,
+                                "decision_id": did, "trade_id": None, "lean": res["lean"]})
             steps_done += 1
             if progress and steps_done % 25 == 0:
                 progress(steps_done)
             if cfg.max_steps and steps_done >= cfg.max_steps:
                 break
         for pd in pending:  # resolve o que for possível no fim da série
-            out = binary.settle(base, open_ts, close_ts, pd["direction"] or pd["lean"] or 1, pd["entry_ts"], pd["expiry_ts"], p.payout)
-            if out:
-                _resolve(mem, pd, out, trades, abstentions)
+            out = binary.settle_ticket(path, pd, rules)
+            if out and not out.get("void"):
+                _resolve(mem, pd, out, trades, abstentions, data, news)
     metrics = compute_metrics(trades, mem, p.payout)
     metrics["decisions"] = dict(decisions_count)
     metrics["steps"] = steps_done
@@ -114,16 +131,30 @@ def run(datasets: dict[str, MarketData], cfg: BTConfig, params: ModelParams, new
     metrics["sources"] = sorted({d.source for d in datasets.values()})
     metrics["run_id"] = run_id
     metrics["model_version"] = model_version
+    metrics["rules"] = rules.to_dict()
+    metrics["timeframe"] = tf
     metrics["period"] = {a: [d.base[max(cfg.warmup, int(len(d.base) * cfg.start_frac))].ts,
                              d.base[min(len(d.base) - 1, int(len(d.base) * cfg.end_frac) - 1)].ts] for a, d in datasets.items()}
+    ms = mem.mistakes(1000)
+    cats = defaultdict(int)
+    for m in ms:
+        for c in m["categories"] or []:
+            cats[c] += 1
+    metrics["mistakes"] = {"total": len(ms), "by_category": dict(sorted(cats.items(), key=lambda kv: -kv[1])),
+                           "examples": [{k: m[k] for k in ("asset", "tf", "direction", "entry_ts", "entry_price", "exit_price",
+                                                           "cause", "categories", "learning")} for m in ms[:12]]}
+    from .ranking import ranking
+    metrics["ranking"] = ranking(mem)
     return metrics
 
 
-def _resolve(mem: Memory, pd: dict, out: dict, trades: list, abstentions: dict) -> None:
-    rv = learning.review(mem, pd["decision"], pd["decision_id"], pd["trade_id"], out, pd["expiry_ts"])
+def _resolve(mem: Memory, pd: dict, out: dict, trades: list, abstentions: dict, data=None, news=None) -> None:
+    rv = learning.review(mem, pd["decision"], pd["decision_id"], pd["trade_id"], out, pd["expiry_ts"],
+                         ticket=pd, md=data, news=news)
     if pd["trade_id"]:
         mem.close_trade(pd["trade_id"], out["entry_price"], out["exit_price"], out["result"], out["pnl"], rv)
-        trades.append({**{k: v for k, v in pd.items() if k != "decision"}, **out, "review": rv})
+        trades.append({**{k: v for k, v in pd.items() if k != "decision"}, **out, "review": rv,
+                       "condition": pd["decision"].get("condition")})
     elif "abstention_correct" in rv:
         abstentions["total"] += 1
         abstentions["correct"] += int(rv["abstention_correct"])
@@ -192,6 +223,8 @@ def compute_metrics(trades: list[dict], mem: Memory, payout: float) -> dict:
         "equity": curve, "by_asset": group(lambda t: asset_label(t["asset"])), "by_hour": group(lambda t: f"{t['hour']:02d}h"),
         "by_strategy": group(lambda t: t["strategy"]), "by_confluence": group(lambda t: f"{int(t['confluence'] // 10 * 10)}-{int(t['confluence'] // 10 * 10 + 10)}"),
         "by_direction": group(lambda t: "CALL (alta)" if t["direction"] == 1 else "PUT (baixa)"),
+        "by_tf": group(lambda t: t.get("tf") or "?"),
+        "by_condition": group(lambda t: (t.get("decision") or {}).get("condition") or t.get("condition") or "?"),
         "agents": agents, "quadrants": dict(quad),
         "trades": [{k: t[k] for k in ("asset", "direction", "entry_ts", "expiry_ts", "entry_price", "exit_price",
                                       "result", "pnl", "confluence", "process_quality")} | {"quadrant": t["review"].get("quadrant")}

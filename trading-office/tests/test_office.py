@@ -58,7 +58,7 @@ def test_decision_is_valid(data):
     assert res["decision"] in DECISIONS
     assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
     assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
-    assert len(res["reports"]) == 12
+    assert len(res["reports"]) == 13
     assert res["transcript"][-1]["kind"] == "decision"
 
 
@@ -257,3 +257,58 @@ def test_trendline_detection():
     sw = [Swing(i, i * 900, cs[i].low, "L") for i in (5, 20, 35, 50)]
     lines = trend_lines(cs, sw, 0.002)
     assert lines and lines[0].kind == "LTA" and lines[0].touches >= 3
+
+
+def _dec(as_of, d=1):
+    return {"asset": "EURUSD", "as_of": as_of, "direction": d, "synthetic": True,
+            "confluence": {"score": 70, "classification": "ALTA"}, "process": {"score": 0.7}}
+
+
+def test_ticket_timing_matches_broker_examples():
+    import datetime as dt
+    t0 = int(dt.datetime(2026, 11, 10, 10, 30, tzinfo=dt.timezone.utc).timestamp())
+    r = binary.BrokerRules(entry_delay_s=15)
+    # M1: sinal no fechamento 10:30:00, entrada 10:30:15, expira 10:31:00
+    t = binary.plan_ticket(_dec(t0), "M1", r, has_ticks=True)
+    assert t["ok"] and t["entry_ts"] == t0 + 15 and t["expiry_ts"] == t0 + 60
+    # M5: sinal no fechamento da vela M1 de 10:31 (= 10:32:00), sem atraso → entrada 10:32, expira 10:35
+    t = binary.plan_ticket(_dec(t0 + 120), "M5", binary.BrokerRules(entry_delay_s=0), has_ticks=True)
+    assert t["ok"] and t["entry_ts"] == t0 + 120 and t["expiry_ts"] == t0 + 300
+    # M5 com pouco tempo restante (10:34) não abre ticket
+    assert not binary.plan_ticket(_dec(t0 + 240), "M5", r, has_ticks=True)["ok"]
+    # sem ticks, a entrada nunca usa abertura de vela depois da abertura: vai para a fronteira exata de minuto
+    t = binary.plan_ticket(_dec(t0), "M1", r, has_ticks=False)
+    assert t["entry_ts"] % 60 == 0
+
+
+def test_settle_uses_price_at_entry_instant():
+    from tio.models import Candle
+    t0 = 1_700_000_040 - 1_700_000_040 % 60
+    cs = [Candle(t0 + i * 60, 1.0 + i * 0.001, 1.0005 + i * 0.001, 0.9995 + i * 0.001, 1.0008 + i * 0.001, 0, t0 + (i + 1) * 60)
+          for i in range(5)]
+    ticks = {t0 + 15: 1.0004}            # preço no instante 10:30:15 (diferente da abertura 1.0000)
+    path = binary.PricePath(cs, lambda ts, ref: ticks.get(ts))
+    tk = {"entry_ts": t0 + 15, "expiry_ts": t0 + 60, "direction": 1, "payout": 0.8, "stake": 1.0}
+    out = binary.settle_ticket(path, tk, binary.BrokerRules())
+    assert out["entry_price"] == 1.0004 and out["entry_source"] == "tick da corretora"
+    assert out["exit_price"] == cs[0].close and out["result"] == "WIN"
+    # sem tick no instante: não inventa preço
+    out = binary.settle_ticket(binary.PricePath(cs), tk, binary.BrokerRules())
+    assert out.get("void")
+
+
+def test_loss_analyzer_and_training(tmp_path):
+    from tio.training import run_training
+    d = MarketData.load(SyntheticProvider(bars=5000, end=END), "EURUSD", "M1")
+    mem = Memory(":memory:")
+    p = ModelParams()
+    p.confluence_high, p.min_independent_groups, p.require_tf_agreement = 30.0, 2, False   # mais tickets para o teste
+    m = run({"EURUSD": d}, BTConfig(assets=["EURUSD"], timeframe="M1", step=3, warmup=1500), p)
+    assert m["total"] > 0 and m["rules"]["expiry_mode"] == "candle_close"
+    if m["losses"]:
+        assert m["mistakes"]["total"] == m["losses"]
+        ex = m["mistakes"]["examples"][0]
+        assert ex["categories"] and ex["learning"]
+    assert m["ranking"] and "brier_skill" in m["ranking"][0]
+    rep = run_training({"EURUSD": d}, mem, timeframe="M1", step=6, min_trades=5)
+    assert [s["n"] for s in rep["stages"]] == list(range(1, 11))

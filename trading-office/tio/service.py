@@ -132,7 +132,8 @@ class OfficeService:
                 "news_coverage": [fmt_ts(cov[0]), fmt_ts(cov[1])] if cov else None,
                 "last_candle": fmt_ts(md.base[-1].close_ts) if md else None, "payout": params.payout,
                 "real_money": binary.REAL_MONEY_ENABLED, "autopilot": self.autopilot,
-                "mt5": self.provider.name == "mt5", "strategies": list(STRATEGIES)}
+                "mt5": self.provider.name == "mt5", "strategies": list(STRATEGIES), "broker_rules": self.rules().to_dict(),
+                "has_ticks": self.has_ticks}
 
     def agents_catalog(self) -> list[dict]:
         out = [cls().card() for cls in SPECIALISTS] + [RiskManager().card(), HeadTrader().card()]
@@ -146,59 +147,103 @@ class OfficeService:
         return out
 
     # ------------------------------------------------------------------ análise
+    # ------------------------------------------------------------------ regras da corretora
+    def rules(self) -> "binary.BrokerRules":
+        r = binary.BrokerRules.from_dict(self.prefs.get("broker_rules"))
+        r.payout = self.memory.active_version()[1].payout if "payout" not in (self.prefs.get("broker_rules") or {}) else r.payout
+        return r
+
+    def set_rules(self, body: dict) -> dict:
+        cur = self.rules().to_dict()
+        for k, v in body.items():
+            if k in cur:
+                cur[k] = v
+        cur["entry_delay_s"] = max(0, min(240, int(cur["entry_delay_s"])))
+        cur["expiry_bars"] = max(1, min(30, int(cur["expiry_bars"])))
+        cur["payout"] = max(0.1, min(1.0, float(cur["payout"])))
+        if cur["price_ref"] not in ("bid", "ask", "mid"):
+            cur["price_ref"] = "bid"
+        if cur["expiry_mode"] not in ("candle_close", "bars"):
+            cur["expiry_mode"] = "candle_close"
+        self.prefs["broker_rules"] = cur
+        self._save_prefs()
+        return cur
+
+    @property
+    def has_ticks(self) -> bool:
+        return hasattr(self.provider, "price_at")
+
+    def _md_for(self, asset: str, tf: str):
+        """Mesas M1/M5 decidem a cada vela M1 fechada (M5 = contexto, M1 = gatilho)."""
+        if tf in ("M1", "M5"):
+            md = self.data(asset, "M1")
+            if md is not None:
+                return md
+        return self.data(asset, tf)
+
+    # ------------------------------------------------------------------ análise
     def analyze(self, asset: str, tf: Optional[str] = None, record: bool = True) -> dict:
         tf = tf or self.base_tf
-        md = self.data(asset, tf)
+        md = self._md_for(asset, tf)
         if md is None:
             return {"error": f"Sem dados de {asset} em {tf} na fonte '{self.provider.name}'."}
         version, params = self.params()
-        key = (asset, tf, md.base[-1].close_ts, version, tuple(params.allowed_hours or ()))
+        rules = self.rules()
+        params.payout = rules.payout
+        key = (asset, tf, md.base[-1].close_ts, version, tuple(params.allowed_hours or ()), json.dumps(rules.to_dict(), sort_keys=True))
         with self.lock:
             if key in self._analysis:
                 return self._analysis[key]
             self.resolve_pending(asset, tf, md)
-            ctx = md.context(None, self.news, self.memory, params)
+            ctx = md.context(None, self.news, self.memory, params, focus_tf=tf)
+            decided_at = None if md.synthetic else time.time()
+            probe = binary.plan_ticket({"asset": asset, "as_of": ctx.as_of, "direction": 1, "synthetic": md.synthetic,
+                                        "confluence": {"score": 0, "classification": ""}, "process": {"score": 0}},
+                                       tf, rules, decided_at, self.has_ticks)
+            ctx.ticket = {"entry_ts": probe["entry_ts"], "expiry_ts": probe["expiry_ts"], "tf": tf}
             res = self.office.meet(ctx, version)
             res["as_of_label"] = fmt_ts(res["as_of"])
-            res["chart"] = self.chart(md, res)
-            res["expiry_bars"] = self.expiry.get(tf, 3)
+            res["chart"] = self.chart(md, res, tf=tf, as_of=ctx.as_of)
+            res["ticket_plan"] = {k: probe[k] for k in ("entry_ts", "expiry_ts", "remaining_s", "entry_delay_s", "ok")} | \
+                                 {"reason": probe.get("reason"), "rules": rules.to_dict()}
             if record:
-                self._record(asset, tf, md, res, params, version)
+                self._record(asset, tf, md, res, params, version, rules, decided_at)
             self._analysis[key] = res
             if len(self._analysis) > 400:
                 for k in list(self._analysis)[:200]:
                     self._analysis.pop(k, None)
             return res
 
-    def _record(self, asset, tf, md, res, params, version) -> None:
+    def _record(self, asset, tf, md, res, params, version, rules, decided_at) -> None:
         exists = self.memory.q("SELECT id FROM decisions WHERE mode='live' AND asset=? AND tf=? AND as_of=? AND model_version=?",
                                (asset, tf, res["as_of"], version))
         if exists:
             return
         did = self.memory.record_decision(res, self.office.strategy)
         res["decision_id"] = did
-        sec = TF_SECONDS[tf]
-        exp = self.expiry.get(tf, 3)
-        late = (not md.synthetic) and (time.time() - res["as_of"] > 0.35 * sec)
-        plan = binary.plan_trade(res, md.base, tf, exp, params.payout, self.office.strategy)
         busy = self.memory.q("SELECT 1 FROM trades WHERE status='open' AND mode='live' AND asset=? AND tf=?", (asset, tf))
-        if plan and not busy and not late:
-            self.memory.open_trade(did, plan)
-            res["paper_trade"] = "aberta"
-        else:
-            if plan and late:
-                res["paper_trade"] = "não aberta: decisão tomada tarde demais em relação ao fechamento do candle"
-            # decisão sem operação também é avaliada (qualidade de "não operar")
-            self.memory.x("INSERT INTO trades(decision_id,run_id,mode,asset,tf,strategy,direction,entry_ts,expiry_ts,"
-                          "payout,stake,hour,confluence,confluence_class,process_quality,synthetic,status)"
-                          " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                          (did, self.memory.run_id, "live-shadow", asset, tf, self.office.strategy,
-                           res["lean"], res["as_of"], res["as_of"] + exp * sec, params.payout, 0,
-                           0, res["confluence"]["score"], res["confluence"]["classification"],
-                           res["process"]["score"], int(res["synthetic"]), "open"))
+        if res["direction"]:
+            t = binary.plan_ticket(res, tf, rules, decided_at, self.has_ticks, self.office.strategy)
+            if t["ok"] and not busy:
+                tid = self.memory.open_trade(did, t)
+                self.memory.x("UPDATE trades SET signal_ts=?, entry_delay_s=? WHERE id=?", (t["signal_ts"], t["entry_delay_s"], tid))
+                res["paper_trade"] = (f"ticket {'CALL' if t['direction'] > 0 else 'PUT'} aberto: entrada {fmt_ts(t['entry_ts'])}, "
+                                      f"expira {fmt_ts(t['expiry_ts'])}")
+                return
+            res["paper_trade"] = "não aberto: " + (t.get("reason") or "já existe ticket aberto neste par/temporalidade")
+        lean = dict(res, direction=res["lean"] or 1)
+        t = binary.plan_ticket(lean, tf, rules, decided_at, self.has_ticks, self.office.strategy)
+        # decisão sem operação também é avaliada (qualidade de "não operar")
+        self.memory.x("INSERT INTO trades(decision_id,run_id,mode,asset,tf,strategy,direction,entry_ts,expiry_ts,"
+                      "payout,stake,hour,confluence,confluence_class,process_quality,synthetic,status,signal_ts)"
+                      " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (did, self.memory.run_id, "live-shadow", asset, tf, self.office.strategy,
+                       res["lean"], t["entry_ts"], t["expiry_ts"], rules.payout, 0,
+                       t["hour"], res["confluence"]["score"], res["confluence"]["classification"],
+                       res["process"]["score"], int(res["synthetic"]), "open", res["as_of"]))
 
-    def chart(self, md: MarketData, res: dict, bars: int = 160) -> dict:
-        cs = md.base[-bars:]
+    def chart(self, md: MarketData, res: dict, bars: int = 160, tf: Optional[str] = None, as_of: Optional[int] = None) -> dict:
+        cs = (md.closed(tf, as_of, bars) if tf and as_of and tf in md.tf else None) or md.base[-bars:]
         rep = {r["agent"]: r for r in res["reports"]}
         ov = {"candles": [c.to_list() for c in cs]}
         vp = rep.get("VP", {}).get("data", {})
@@ -374,27 +419,57 @@ class OfficeService:
 
     # ------------------------------------------------------------------ simuladas
     def resolve_pending(self, asset: str, tf: str, md: MarketData) -> None:
-        base = md.base
-        open_ts = [c.ts for c in base]
-        close_ts = [c.close_ts for c in base]
+        rules = self.rules()
+        fine = md.tf.get("M1") or md.base
+        price_fn = (lambda ts, ref: self.provider.price_at(asset, ts, ref)) if self.has_ticks else None
+        path = binary.PricePath(fine, price_fn)
         rows = self.memory.q("SELECT * FROM trades WHERE status='open' AND asset=? AND tf=? AND mode IN ('live','live-shadow')",
                              (asset, tf))
-        for t in rows:
-            if t["expiry_ts"] > base[-1].close_ts:
+        for row in rows:
+            t = dict(row)
+            if t["expiry_ts"] > path.last_ts():
                 continue
-            out = binary.settle(base, open_ts, close_ts, t["direction"] or 1, t["entry_ts"], t["expiry_ts"], t["payout"])
             decision = self.memory.decision_payload(t["decision_id"])
-            if out is None or decision is None:
-                if base[-1].close_ts - t["expiry_ts"] > 50 * TF_SECONDS[tf]:  # sem dados para resolver: descarta
-                    self.memory.x("UPDATE trades SET status='void' WHERE id=?", (t["id"],))
+            out = binary.settle_ticket(path, {**t, "direction": t["direction"] or 1}, rules)
+            if out is None or decision is None or out.get("void"):
+                if out and out.get("void") or path.last_ts() - t["expiry_ts"] > 50 * TF_SECONDS[tf]:
+                    self.memory.x("UPDATE trades SET status='void', review=? WHERE id=?",
+                                  (json.dumps({"reason": (out or {}).get("reason", "sem dados")}, ensure_ascii=False), t["id"]))
                 continue
             is_trade = t["mode"] == "live"
-            rv = learning.review(self.memory, decision, t["decision_id"], t["id"] if is_trade else None, out, t["expiry_ts"])
+            rv = learning.review(self.memory, decision, t["decision_id"], t["id"] if is_trade else None, out, t["expiry_ts"],
+                                 ticket=t, md=md, news=self.news)
+            self.memory.x("UPDATE trades SET entry_source=?, exit_source=?, mfe=?, mae=?, post_move=? WHERE id=?",
+                          (out.get("entry_source"), out.get("exit_source"), out.get("mfe"), out.get("mae"), out.get("post_move"), t["id"]))
             if is_trade:
                 self.memory.close_trade(t["id"], out["entry_price"], out["exit_price"], out["result"], out["pnl"], rv)
             else:
                 self.memory.x("UPDATE trades SET status='closed', entry_price=?, exit_price=?, review=? WHERE id=?",
                               (out["entry_price"], out["exit_price"], json.dumps(rv, ensure_ascii=False), t["id"]))
+
+    # ------------------------------------------------------------------ treinamento, erros e ranking
+    def mistakes(self, mode: Optional[str] = None, since_id: int = 0, limit: int = 100) -> list[dict]:
+        return self.memory.mistakes(limit, mode=mode, since_id=since_id)
+
+    def ranking(self) -> dict:
+        from .ranking import ranking
+        live = ranking(self.memory, mode="live")
+        last = [r for r in self.memory.reports(30) if r["kind"] == "treinamento"]
+        return {"live": live, "training": last[0]["body"].get("ranking") if last else None,
+                "training_at": last[0]["created"] if last else None}
+
+    def train(self, cfg: dict, progress=None) -> dict:
+        from .training import run_training
+        tf = cfg.get("timeframe") or "M1"
+        assets = [a for a in cfg.get("assets") or ASSETS[:2] if a in ASSETS]
+        datasets = {a: self._md_for(a, tf) for a in assets}
+        datasets = {a: d for a, d in datasets.items() if d}
+        rep = run_training(datasets, self.memory, self.news, timeframe=tf, split=float(cfg.get("split", 0.6)),
+                           step=int(cfg.get("step", 2)), min_trades=int(cfg.get("min_trades", 20)),
+                           rules=self.rules().to_dict(), progress=progress)
+        with self.lock:
+            self._analysis.clear()
+        return rep
 
     def history(self) -> dict:
         trades = self.memory.trades(300, mode="live")

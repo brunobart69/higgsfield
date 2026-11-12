@@ -9,7 +9,7 @@ from .context import MarketContext
 from .models import BEAR, BULL, NEUTRAL, DIR_LABEL, GROUPS, TIMEFRAMES, Message, asset_label
 
 STRATEGIES = {
-    "comite": ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL"],
+    "comite": ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM"],
     "indicadores_mt5": ["NEWS", "MT5I", "MTF", "SR", "LIQ"],
     "tendencia": ["NEWS", "PA", "RET", "SR", "FIB", "MTF", "LIQ", "TL"],
     "reversao": ["NEWS", "REV", "LIQ", "VOL", "SR", "VP", "PA"],
@@ -42,6 +42,9 @@ class Office:
         for a in self.specialists:
             r = a.run(ctx)
             reports.append(r)
+            if a.code == "FIB" and not r.abstain:   # Taxas Ouro/Prata viram obstáculos para o agente de Timing
+                ctx._fib_taxas = [(v, f"{c['label']} {k}") for n, c in (r.data.get("categories") or {}).items()
+                                  if c and n in ("OURO", "PRATA") for k, v in c["levels"].items() if not k.startswith("ext")]
             txt = r.summary
             if r.lessons_used:
                 txt += f" [consultei {r.lessons_used} registros de memória]"
@@ -50,6 +53,33 @@ class Office:
                 tr.append(Message(a.name, "⚠ " + w, "analysis"))
         by_code = {r.agent: r for r in reports}
         agents_by_code = {a.code: a for a in self.specialists}
+
+        # ---------------------------------------------------------- alerta de Taxa OURO / PRATA
+        fibr = by_code.get("FIB")
+        taxa = fibr.data.get("taxa_alert") if fibr else None
+        if taxa:
+            tr.append(Message(H, f"Atenção: preço na {taxa['label']} {taxa['level']} ({taxa['price']:.5g}). Acionando os "
+                                 f"especialistas relevantes. Leitura da região: {taxa['scenario']}. Fibonacci sozinho não "
+                                 "autoriza entrada.", "request"))
+            for code in taxa["relevant_agents"]:
+                rr = by_code.get(code)
+                if rr and not rr.abstain:
+                    tr.append(Message(rr.name, f"Na região da {taxa['label']}: {rr.summary} (viés {DIR_LABEL[rr.bias]})", "reply"))
+
+        # ---------------------------------------------------------- consulta ao banco de erros
+        mem = ctx.memory
+        if mem is not None and hasattr(mem, "mistake_stats"):
+            lean_now = 0
+            bull = sum(r.confidence for r in reports if r.bias == 1)
+            bear = sum(r.confidence for r in reports if r.bias == -1)
+            lean_now = 1 if bull > bear else -1 if bear > bull else 0
+            if lean_now:
+                ms = mem.mistake_stats(ctx.asset, ctx.focus_tf, lean_now, ctx.as_of)
+                if ms["n"]:
+                    top = sorted(ms["categories"].items(), key=lambda kv: -kv[1])[:3]
+                    tr.append(Message(H, f"Consultei o banco de erros: {ms['n']} perda(s) anteriores em {ctx.asset} "
+                                         f"{ctx.focus_tf} na direção {DIR_LABEL[lean_now]}. Causas mais comuns: "
+                                         + ", ".join(f"{k} ({v})" for k, v in top) + ".", "request"))
 
         # ---------------------------------------------------------- rodada 2: debate
         if debate:
@@ -110,7 +140,10 @@ class Office:
         news = by_code.get("NEWS")
         news_avoid = bool(news and news.data.get("avoid"))
         data_ok = sum(1 for r in reports if not r.abstain) >= max(3, len(reports) // 2)
-        draft = {"confluence": c, "news_avoid": news_avoid}
+        tf_cmp = self.head.compare_tfs(ctx, by_code, c["direction"])
+        if tf_cmp["applies"]:
+            tr.append(Message(H, f"Comparando temporalidades: {tf_cmp['text']}", "request"))
+        draft = {"confluence": c, "news_avoid": news_avoid, "tf_compare": tf_cmp, "reports": by_code}
         risk = None
         if c["classification"] == "ALTA" and data_ok and not news_avoid and c["direction"] != NEUTRAL:
             tr.append(Message(H, f"Cenário preliminar de {DIR_LABEL[c['direction']]} com confluência ALTA "
@@ -123,7 +156,12 @@ class Office:
         narrative = self.head.narrative(ctx, reports, c, decision, reason, divergences)
         tr.append(Message(H, narrative, "decision"))
 
+        if decision.startswith("CENÁRIO") and tf_cmp["applies"] and not tf_cmp["ok"] and p.require_tf_agreement:
+            decision, reason = "AGUARDAR CONFIRMAÇÃO", "Conflito entre temporalidades: " + tf_cmp["text"]
         direction = c["direction"] if decision.startswith("CENÁRIO") else NEUTRAL
+        mtfr = by_code.get("MTF")
+        lab = ((mtfr.data.get("map") or {}).get(ctx.focus_tf) or {}).get("label") if mtfr else None
+        condition = {"ALTA": "tendência de alta", "BAIXA": "tendência de baixa", "CONSOLIDAÇÃO": "consolidação"}.get(lab, "indefinida")
         return {
             "asset": ctx.asset, "timeframe": ctx.focus_tf, "as_of": ctx.as_of, "price": ctx.price,
             "decision": decision, "reason": reason, "direction": direction, "lean": c["direction"],
@@ -131,5 +169,6 @@ class Office:
             "reports": [r.to_dict() for r in reports], "transcript": [m.to_dict() for m in tr],
             "narrative": narrative, "source": ctx.data.source, "synthetic": ctx.data.synthetic,
             "volume_kind": ctx.data.volume_kind, "model_version": model_version, "strategy": self.strategy,
-            "news_avoid": news_avoid,
+            "news_avoid": news_avoid, "tf_compare": tf_cmp, "condition": condition, "taxa_alert": taxa,
+            "ticket": getattr(ctx, "ticket", None),
         }

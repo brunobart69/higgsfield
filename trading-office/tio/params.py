@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "RISK", "HEAD"]
+AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RISK", "HEAD"]
 
 
 @dataclass
@@ -36,6 +36,22 @@ class ModelParams:
     volatility_min_mult: float = 0.35
     # Filtro de horário (horas UTC permitidas para operações simuladas; None = sem filtro)
     allowed_hours: Optional[list] = None
+    # Comparação obrigatória M1 × M5 (definida pelo usuário)
+    require_tf_agreement: bool = True
+    # Regras de prevenção (desligadas até serem validadas fora da amostra pelo ciclo de treinamento)
+    require_htf_alignment: bool = False      # não operar contra a tendência da TF de contexto (M5 p/ M1, H1 p/ M5)
+    block_consolidation: bool = False        # não operar em consolidação
+    require_lower_tf_confirmation: bool = False  # exigir pressão M1 a favor
+    max_premove_atr: Optional[float] = None  # entrada atrasada: preço já andou X ATR desde o sinal
+    liquidity_buffer_atr: Optional[float] = None  # liquidez não varrida contra a entrada a menos de X ATR
+    block_exhaustion_rsi: Optional[float] = None  # RSI M1 extremo a favor da entrada
+    breakout_confirm_closes: int = 1         # rompimentos precisam de N fechamentos
+    reversal_requires_choch: bool = False
+    fib_requires_reaction: bool = False
+    sr_min_reactions: int = 0
+    min_volume_ratio: Optional[float] = None
+    min_active_agents: int = 0
+    expiry_bars: Optional[int] = None        # None = regra da corretora (fechamento da vela)
     # Notícias
     news_block_before_min: int = 30
     news_block_after_min: int = 45

@@ -21,8 +21,12 @@ QUADRANTS = {
 }
 
 
-def review(memory, decision: dict, decision_id: int, trade_id: Optional[int], outcome: dict, available_at: int) -> dict:
+def review(memory, decision: dict, decision_id: int, trade_id: Optional[int], outcome: dict, available_at: int,
+           ticket: Optional[dict] = None, md=None, news=None) -> dict:
     actual = outcome["actual_dir"]
+    tf = decision.get("timeframe")
+    cond = decision.get("condition")
+    hour = int(((ticket or {}).get("entry_ts", decision["as_of"]) // 3600) % 24)
     right, wrong, ignored = [], [], []
     for r in decision["reports"]:
         if r["abstain"] or r["bias"] == NEUTRAL or actual == 0:
@@ -30,7 +34,7 @@ def review(memory, decision: dict, decision_id: int, trade_id: Optional[int], ou
         else:
             correct = int(r["bias"] == actual)
         memory.record_agent_outcome(decision_id, trade_id or 0, r["agent"], decision["asset"], r["bias"],
-                                    r["confidence"], correct, available_at)
+                                    r["confidence"], correct, available_at, tf, cond, hour)
         if r["agent"] == "MT5I" and actual:
             for ind_name, d in (r["data"].get("signals") or {}).items():  # desempenho por indicador do usuário
                 memory.record_agent_outcome(decision_id, trade_id or 0, f"MT5I:{ind_name}", decision["asset"], d,
@@ -66,6 +70,18 @@ def review(memory, decision: dict, decision_id: int, trade_id: Optional[int], ou
             for i in ignored:
                 memory.add_lesson("HEAD", decision["asset"], f"sinal_ignorado:{i['agent']}", "erro",
                                   f"Perda com sinal contrário de {i['agent']}: {i['evidence'][:160]}", decision_id, trade_id, available_at)
+        if res == "LOSS" and md is not None and ticket is not None and hasattr(memory, "add_mistake"):
+            # LOSS ANALYZER: investigação obrigatória, reunião pós-LOSS e registro no Trading Mistakes Database
+            from .loss_analyzer import investigate
+            try:
+                inv = investigate(decision, ticket, outcome, md, news)
+                mid = memory.add_mistake({**inv, "decision_id": decision_id, "trade_id": trade_id, "available_at": available_at})
+                out["mistake_id"] = mid
+                out["loss_categories"] = inv["categories"]
+                out["loss_cause"] = inv["cause"]
+                out["prevention"] = [r["text"] for r in inv["prevention"]]
+            except Exception as e:  # a investigação nunca deve derrubar a simulação
+                out["investigation_error"] = repr(e)
         memory.add_lesson("HEAD", decision["asset"], f"processo_{pq.lower()}", "acerto" if res == "WIN" else "erro",
                           out["explanation"], decision_id, trade_id, available_at)
     else:

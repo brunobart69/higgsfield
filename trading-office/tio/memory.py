@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE TABLE IF NOT EXISTS backtests (
   id INTEGER PRIMARY KEY, created TEXT, run_id TEXT, config TEXT, metrics TEXT, synthetic INTEGER
 );
+CREATE TABLE IF NOT EXISTS fib_anchors (
+  asset TEXT, tf TEXT, ref_ts INTEGER, low REAL, high REAL, dir INTEGER, created TEXT,
+  PRIMARY KEY (asset, tf, ref_ts)
+);
+CREATE TABLE IF NOT EXISTS trading_mistakes (
+  id INTEGER PRIMARY KEY, created TEXT, run_id TEXT, mode TEXT, asset TEXT, tf TEXT, direction INTEGER,
+  signal_ts INTEGER, entry_ts INTEGER, expiry_ts INTEGER, entry_price REAL, exit_price REAL, result TEXT,
+  hour INTEGER, condition TEXT, categories TEXT, cause TEXT, evidence TEXT, agents TEXT, meeting TEXT,
+  learning TEXT, prevention TEXT, analysis TEXT, decision_id INTEGER, trade_id INTEGER, available_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_mistakes ON trading_mistakes(asset, tf, direction, available_at);
 CREATE INDEX IF NOT EXISTS ix_lessons ON lessons(agent, asset, tag, available_at);
 CREATE INDEX IF NOT EXISTS ix_outcomes ON agent_outcomes(agent, available_at);
 """
@@ -66,6 +77,16 @@ class Memory:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(agent_outcomes)")}
+        for c, t in (("tf", "TEXT"), ("condition", "TEXT"), ("hour", "INTEGER")):
+            if c not in cols:
+                self.conn.execute(f"ALTER TABLE agent_outcomes ADD COLUMN {c} {t}")
+        tcols = {r[1] for r in self.conn.execute("PRAGMA table_info(trades)")}
+        for c, t in (("signal_ts", "INTEGER"), ("entry_source", "TEXT"), ("exit_source", "TEXT"), ("mfe", "REAL"),
+                     ("mae", "REAL"), ("post_move", "REAL"), ("entry_delay_s", "INTEGER")):
+            if c not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {c} {t}")
+        self.conn.commit()
         self.lock = threading.RLock()
         self.run_id = run_id
         self.mode = mode
@@ -180,16 +201,18 @@ class Memory:
 
     # ------------------------------------------------------------ agentes
     def record_agent_outcome(self, decision_id: int, trade_id: int, agent: str, asset: str, bias: int,
-                             confidence: float, correct: Optional[int], available_at: int) -> None:
+                             confidence: float, correct: Optional[int], available_at: int, tf: Optional[str] = None,
+                             condition: Optional[str] = None, hour: Optional[int] = None) -> None:
         if correct is not None:
             self._load_agg()
             b = self._agg.setdefault(self.run_id, {}).setdefault(agent, {}).setdefault(min(4, int(confidence * 5)), [0, 0])
             b[0] += correct
             b[1] += 1
             self._agg_max_ts[self.run_id] = max(self._agg_max_ts.get(self.run_id, 0), available_at)
-        self.x("INSERT INTO agent_outcomes(decision_id,trade_id,run_id,mode,agent,asset,bias,confidence,correct,available_at)"
-               " VALUES(?,?,?,?,?,?,?,?,?,?)",
-               (decision_id, trade_id, self.run_id, self.mode, agent, asset, bias, confidence, correct, available_at))
+        self.x("INSERT INTO agent_outcomes(decision_id,trade_id,run_id,mode,agent,asset,bias,confidence,correct,available_at,"
+               "tf,condition,hour) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+               (decision_id, trade_id, self.run_id, self.mode, agent, asset, bias, confidence, correct, available_at,
+                tf, condition, hour))
 
     def agent_stats(self, before: Optional[int] = None, mode: Optional[str] = None) -> dict[str, dict]:
         sql = "SELECT agent, correct, confidence FROM agent_outcomes WHERE correct IS NOT NULL"
@@ -266,6 +289,51 @@ class Memory:
         if mode:
             return [dict(r) for r in self.q("SELECT * FROM lessons WHERE mode=? ORDER BY id DESC LIMIT ?", (mode, limit))]
         return [dict(r) for r in self.q("SELECT * FROM lessons ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ------------------------------------------------------------ Taxas Fibonacci (âncoras imutáveis)
+    def fib_anchor(self, asset: str, tf: str, ref_ts: int, low: float, high: float, d: int) -> tuple:
+        r = self.q("SELECT low, high, dir FROM fib_anchors WHERE asset=? AND tf=? AND ref_ts=?", (asset, tf, ref_ts))
+        if r:
+            return r[0]["low"], r[0]["high"], r[0]["dir"]
+        self.x("INSERT OR IGNORE INTO fib_anchors VALUES(?,?,?,?,?,?,?)", (asset, tf, ref_ts, low, high, d, now_iso()))
+        return low, high, d
+
+    # ------------------------------------------------------------ TRADING MISTAKES DATABASE
+    def add_mistake(self, m: dict) -> int:
+        cols = ["created", "run_id", "mode", "asset", "tf", "direction", "signal_ts", "entry_ts", "expiry_ts", "entry_price",
+                "exit_price", "result", "hour", "condition", "categories", "cause", "evidence", "agents", "meeting",
+                "learning", "prevention", "analysis", "decision_id", "trade_id", "available_at"]
+        row = {**m, "created": now_iso(), "run_id": self.run_id, "mode": self.mode}
+        for k in ("categories", "evidence", "agents", "meeting", "prevention", "analysis"):
+            row[k] = json.dumps(row.get(k), ensure_ascii=False, default=str)
+        return self.x(f"INSERT INTO trading_mistakes({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
+                      tuple(row.get(c) for c in cols))
+
+    def mistakes(self, limit: int = 100, mode: Optional[str] = None, since_id: int = 0) -> list[dict]:
+        sql, args = "SELECT * FROM trading_mistakes WHERE id>?", [since_id]
+        if mode:
+            sql += " AND mode=?"
+            args.append(mode)
+        out = []
+        for r in self.q(sql + " ORDER BY id DESC LIMIT ?", tuple(args + [limit])):
+            d = dict(r)
+            for k in ("categories", "evidence", "agents", "meeting", "prevention", "analysis"):
+                d[k] = json.loads(d[k]) if d[k] else None
+            out.append(d)
+        return out
+
+    def mistake_stats(self, asset: str, tf: str, direction: int, before: int, condition: Optional[str] = None) -> dict:
+        """Perdas anteriores (somente passado, mesma execução) em situação semelhante, por categoria."""
+        rows = self.q("SELECT categories, condition FROM trading_mistakes WHERE run_id=? AND available_at<=? AND tf=? "
+                      "AND direction=? AND (asset=? OR ?='*')", (self.run_id, before, tf, direction, asset, asset))
+        cats: dict = {}
+        same_cond = 0
+        for r in rows:
+            for c in json.loads(r["categories"] or "[]"):
+                cats[c] = cats.get(c, 0) + 1
+            if condition and r["condition"] == condition:
+                same_cond += 1
+        return {"n": len(rows), "categories": cats, "same_condition": same_cond}
 
     # ------------------------------------------------------------ relatórios
     def add_report(self, kind: str, title: str, body: dict) -> None:

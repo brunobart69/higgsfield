@@ -132,6 +132,7 @@ GROUPS = {
     "reversal": "Exaustão / reversão",
     "mt5": "Indicadores do usuário (MT5)",
     "trendline": "Linhas de tendência",
+    "timing": "Timing / micro-estrutura M1",
 }
 
 
