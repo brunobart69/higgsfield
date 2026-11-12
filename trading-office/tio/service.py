@@ -395,6 +395,7 @@ class OfficeService:
                 (bull if c.close >= c.open else bear)[b] += w / (b1 - b0 + 1)
         ov["profile"] = {"lo": lo, "step": step, "bull": [round(x, 2) for x in bull], "bear": [round(x, 2) for x in bear]}
         ov["user_marks"] = rep.get("MT5I", {}).get("data", {}).get("marks")
+        ov["pullback"] = rep.get("PB", {}).get("data")
         return ov
 
     def overview(self, tf: Optional[str] = None) -> list[dict]:

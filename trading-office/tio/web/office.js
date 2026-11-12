@@ -39,13 +39,13 @@
   furn("fridge", 1220, 60, 36, 56);
   furn("round", 1100, 140, 64, 64);
   // área de trabalho
-  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RES"];
+  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RES", "PB"];
   const deskPos = {};
   DESKS.forEach((code, i) => {
-    const row = Math.floor(i / 7), col = i % 7;
-    const x = 34 + col * 156, y = row === 0 ? 384 : 566;
-    furn("desk", x, y, 124, 44, { owner: code });
-    deskPos[code] = { x: x + 62, y: y + 72 };
+    const row = Math.floor(i / 8), col = i % 8;
+    const x = 26 + col * 138, y = row === 0 ? 384 : 566;
+    furn("desk", x, y, 112, 44, { owner: code });
+    deskPos[code] = { x: x + 56, y: y + 72 };
   });
   furn("board", 1140, 352, 112, 382);            // painel de cotações
   furn("plant", 20, 290, 28, 28); furn("plant", 20, 712, 28, 28); furn("plant", 1100, 712, 28, 28);
@@ -56,8 +56,8 @@
   // cadeiras da reunião: Head na cabeceira esquerda, Risk na direita, 6 em cima e 6 embaixo
   const meetSeat = { HEAD: { x: 360, y: 139 }, RISK: { x: 720, y: 139 } };
   DESKS.forEach((code, i) => {
-    const top = i < 7; const k = top ? i : i - 7;
-    meetSeat[code] = { x: 404 + k * 45, y: top ? 80 : 198 };
+    const top = i < 8; const k = top ? i : i - 8;
+    meetSeat[code] = { x: 400 + k * 39, y: top ? 80 : 198 };
   });
   const coffeeSpots = [{ x: 1060, y: 78 }, { x: 1110, y: 78 }, { x: 1160, y: 78 }, { x: 1085, y: 222 }, { x: 1180, y: 222 }, { x: 1112, y: 312 }];
 
@@ -128,6 +128,7 @@
     TL: { shirt: "#d0603a", skin: "#7b4c31", hair: "#0c0907", style: "buzz" },
     TIM: { shirt: "#e0b23c", skin: "#c99572", hair: "#3a2416", style: "long" },
     RES: { shirt: "#5b7f3a", skin: "#e9c19b", hair: "#6b4a2b", style: "short" },
+    PB: { shirt: "#3b6fd6", skin: "#b07a55", hair: "#1a120c", style: "bob" },
     RISK: { shirt: "#7d2f3b", skin: "#e6b994", hair: "#4a4a4a", style: "bob" },
     HEAD: { shirt: "#1d2b3a", skin: "#d4a07a", hair: "#2d2d2d", style: "short", tie: true },
   };
@@ -372,7 +373,7 @@
       }
     });
   }
-  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", TIM: "Timing M1", RES: "Pesquisa", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
+  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", TIM: "Timing M1", RES: "Pesquisa", PB: "Pullback", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
 
   function drawPerson(p) {
     const c = C(); const L = p.look;
@@ -483,6 +484,7 @@
     if (code === "LIQ") return (d.pools || []).slice(0, 4).map((p) => `${p.kind} ${p.side} em ${fmtP(p.price)}`).join("; ") || "nenhum pool próximo";
     if (code === "VP") return d.poc ? `POC ${fmtP(d.poc)}, VAH ${fmtP(d.vah)}, VAL ${fmtP(d.val)}` : "sem perfil";
     if (code === "FIB") return (d.near_levels || []).map((n) => `${n.cat} ${n.level} em ${fmtP(n.price)}`).join("; ") || "preço longe dos níveis principais";
+    if (code === "PB") return d.state ? `Estado: ${d.state}${d.bos ? `; BOS em ${fmtP(d.bos.level)}` : ""}${d.zone ? `; zona de valor ${fmtP(d.zone[0])}–${fmtP(d.zone[1])}` : ""}${d.retr != null ? `; recuo de ${Math.round(d.retr * 100)}%` : ""}` : "sem rompimento recente";
     if (code === "TL") return (d.lines || []).map((l) => `${l.kind} ${l.tf} em ${fmtP(l.p2)} (${l.touches} toques)`).join("; ") || "nenhuma linha válida";
     if (code === "PA") return [...(d.fvg || []).map((z) => `FVG ${z.dir > 0 ? "de alta" : "de baixa"} ${fmtP(z.low)}–${fmtP(z.high)}`),
       ...(d.order_blocks || []).map((z) => `Order Block ${z.dir > 0 ? "de alta" : "de baixa"} ${fmtP(z.low)}–${fmtP(z.high)}`)].slice(0, 4).join("; ") || "nenhuma zona FVG/OB aberta perto do preço";

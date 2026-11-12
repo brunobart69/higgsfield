@@ -59,6 +59,15 @@ BOS, CHoCH, FVG, Order Block, EQH/EQL, Liquidez, Strong/Weak High/Low, POC, Fibo
 **Conferência**: quantas marcações do seu indicador o escritório também detectou. No gráfico do Painel, as marcações do
 escritório seguem o mesmo estilo e as do seu indicador aparecem com ★ amarelo.
 
+### Agente 17 · Paula, Pullback — e Fibonacci da perna atual
+
+* **Pullback**: depois de um BOS, mede a perna do impulso e acompanha o recuo. Pullback válido = preço volta à região de
+  valor (Fibonacci 0,5–0,705 da perna, reteste do nível rompido ou FVG a favor), sem fechar além da origem da perna e sem
+  CHoCH contra, com vela de rejeição a favor. Estados: aguardando pullback · em pullback · pullback confirmado · pullback
+  falhou. A zona aparece no gráfico com o estado.
+* **Fibonacci da perna atual** (M1/M5 e a perna M5 na mesa M1), como nos indicadores de Smart Money: 0.5 / 0.618 / 0.705 /
+  0.786 com o preço ao lado. Taxa Ouro/Prata fora da faixa do gráfico aparecem como seta na borda, com a distância em pips.
+
 ### Agente 16 · Henrique, Pesquisador (aba Pesquisa)
 
 * Pesquisa **vídeos-aula** (YouTube Data API — chave gratuita, configurável na aba), artigos da **Wikipédia** sobre

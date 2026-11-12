@@ -58,7 +58,7 @@ def test_decision_is_valid(data):
     assert res["decision"] in DECISIONS
     assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
     assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
-    assert len(res["reports"]) == 14
+    assert len(res["reports"]) == 15
     assert res["transcript"][-1]["kind"] == "decision"
 
 
@@ -458,3 +458,29 @@ def test_only_pairs_open_in_mt5(monkeypatch, tmp_path):
     svc.settings({"pairs_mode": "all"})
     assert len(svc.assets) == 8
     OfficeService.PREFS_PATH = None
+
+
+def test_pullback_after_bos_and_leg_fibonacci():
+    from tio.models import Candle
+    # impulso de alta com BOS, recuo até ~60% da perna e vela de rejeição a favor
+    cs, t = [], 0
+    def add(o, h, l, c):
+        nonlocal t
+        cs.append(Candle(t, o, h, l, c, 10, t + 900)); t += 900
+    p = 1.1000
+    for i in range(70):                       # lateral com topos/fundos
+        w = 0.0006 if i % 8 < 4 else -0.0006
+        add(p, p + 0.0009, p - 0.0009, p + w); p += w
+    for i in range(14):                       # impulso forte (rompe o topo)
+        add(p, p + 0.0016, p - 0.0002, p + 0.0014); p += 0.0014
+    for i in range(10):                       # pullback
+        add(p, p + 0.0002, p - 0.0015, p - 0.0012); p -= 0.0012
+    add(p, p + 0.0012, p - 0.0018, p + 0.0010)   # rejeição: pavio inferior e fechamento de alta
+    from tio.models import Series
+    d = MarketData("EURUSD", Series("EURUSD", "M15", cs, "teste", True, "tick"))
+    res = Office(agents=["PB", "FIB", "MTF"]).meet(d.context(None, None, None, ModelParams()))
+    pb = next(r for r in res["reports"] if r["agent"] == "PB")
+    assert pb["data"]["state"] in ("pullback confirmado", "em pullback")
+    assert pb["data"]["bos"]["dir"] == 1 and 0.236 <= pb["data"]["retr"] <= 0.9
+    fib = next(r for r in res["reports"] if r["agent"] == "FIB")
+    assert "PERNA M15" in fib["data"]["categories"]

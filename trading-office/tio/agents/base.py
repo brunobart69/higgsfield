@@ -19,7 +19,7 @@ def session_of(ts: int) -> str:
     return "ny_tarde"
 
 
-PERSONAS = {'NEWS': ('Helena', 'f'), 'PA': ('Rafael', 'm'), 'RET': ('Bianca', 'f'), 'REV': ('Otávio', 'm'), 'VOL': ('Marina', 'f'), 'VP': ('Caio', 'm'), 'SR': ('Lúcia', 'f'), 'FIB': ('Teodoro', 'm'), 'MTF': ('Sofia', 'f'), 'LIQ': ('Gustavo', 'm'), 'MT5I': ('Nina', 'f'), 'TL': ('Diego', 'm'), 'TIM': ('Lívia', 'f'), 'RES': ('Henrique', 'm'), 'RISK': ('Vera', 'f'), 'HEAD': ('Augusto', 'm')}
+PERSONAS = {'NEWS': ('Helena', 'f'), 'PA': ('Rafael', 'm'), 'RET': ('Bianca', 'f'), 'REV': ('Otávio', 'm'), 'VOL': ('Marina', 'f'), 'VP': ('Caio', 'm'), 'SR': ('Lúcia', 'f'), 'FIB': ('Teodoro', 'm'), 'MTF': ('Sofia', 'f'), 'LIQ': ('Gustavo', 'm'), 'MT5I': ('Nina', 'f'), 'TL': ('Diego', 'm'), 'TIM': ('Lívia', 'f'), 'RES': ('Henrique', 'm'), 'PB': ('Paula', 'f'), 'RISK': ('Vera', 'f'), 'HEAD': ('Augusto', 'm')}
 
 
 class Agent:

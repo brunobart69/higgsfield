@@ -134,6 +134,7 @@ GROUPS = {
     "trendline": "Linhas de tendência",
     "timing": "Timing / micro-estrutura M1",
     "research": "Indicadores pesquisados e aprovados",
+    "pullback": "Pullback após rompimento",
 }
 
 

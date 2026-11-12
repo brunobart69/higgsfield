@@ -93,14 +93,53 @@ function drawChart(an) {
     (ch.order_blocks || []).forEach((z) => box(z, z.dir > 0 ? "rgba(40,170,140,.22)" : "rgba(200,60,90,.22)", "ORDER BLOCK", z.dir > 0 ? "#3ee6a8" : "#ff6b8a"));
     (ch.zones || []).slice().sort((a, b) => Math.abs((a.low + a.high) / 2 - cs[cs.length - 1][4]) - Math.abs((b.low + b.high) / 2 - cs[cs.length - 1][4])).slice(0, 3)
       .forEach((z) => box({ ...z, ts: t0 }, "rgba(74,168,255,.08)", null));
-    // Taxas Ouro / Prata com preço no rótulo
-    Object.entries(ch.fib || {}).forEach(([cat, f]) => {
-      const tax = cat === "OURO" || cat === "PRATA"; const col = cat === "OURO" ? css("--gold") : cat === "PRATA" ? css("--silver") : "rgba(111,211,196,.6)";
-      (tax ? ["0.236", "0.382", "0.500", "0.618", "0.705", "0.786"] : ["0.500", "0.618", "0.705"]).forEach((k) => {
+    // Fibonacci da PERNA ATUAL (como no indicador do usuário): 0.5 / 0.618 / 0.705 / 0.786 com preço
+    const FIBC = { "0.382": "#8fa3b8", "0.500": "#a78bfa", "0.618": "#4aa8ff", "0.705": "#ff4d6d", "0.786": "#f2b53a" };
+    const usedY = [];
+    Object.entries(ch.fib || {}).filter(([cat]) => cat.startsWith("PERNA")).sort(([a]) => (a.endsWith(an.timeframe) ? -1 : 1)).forEach(([cat, f]) => {
+      const main = cat.endsWith(an.timeframe);
+      const x0 = Math.max(0, tsx(f.t1 || t0));
+      (main ? ["0.382", "0.500", "0.618", "0.705", "0.786"] : ["0.500", "0.618", "0.705"]).forEach((k) => {
         const v = f.levels[k]; if (!inR(v)) return;
-        hline(v, col, tax ? [6, 3] : [2, 4], `${tax ? (cat === "OURO" ? "TAXA OURO " : "TAXA PRATA ") : ""}${k}(${fmtP(v)})`, chartW * 0.55, tax ? 1.2 : 1);
+        const yy = y(v);
+        c.strokeStyle = FIBC[k]; c.globalAlpha = main ? 0.95 : 0.45; c.lineWidth = 1;
+        c.beginPath(); c.moveTo(x0, yy); c.lineTo(chartW, yy); c.stroke();
+        if (!usedY.some((u) => Math.abs(u - yy) < 11)) {     // rótulo só se não colidir com outro
+          usedY.push(yy);
+          const txt = `${k === "0.500" ? "0.5" : k}(${fmtP(v)})${main ? "" : " · " + cat.replace("PERNA ", "")}`;
+          c.font = "600 10px JetBrains Mono, monospace"; const tw = c.measureText(txt).width;
+          c.fillStyle = "rgba(7,9,13,.75)"; c.fillRect(chartW - tw - 10, yy - 12, tw + 6, 12);
+          c.fillStyle = FIBC[k]; c.fillText(txt, chartW - tw - 7, yy - 3);
+        }
+        c.globalAlpha = 1;
       });
     });
+    // Taxas Ouro / Prata (e Diamante/Bronze): no gráfico quando visíveis, senão seta na borda com a distância
+    const lastPx = cs[cs.length - 1][4]; const edges = { up: [], down: [] };
+    Object.entries(ch.fib || {}).filter(([cat]) => !cat.startsWith("PERNA")).forEach(([cat, f]) => {
+      const tax = cat === "OURO" || cat === "PRATA"; const col = cat === "OURO" ? css("--gold") : cat === "PRATA" ? css("--silver") : "rgba(111,211,196,.6)";
+      const name = cat === "OURO" ? "TAXA OURO" : cat === "PRATA" ? "TAXA PRATA" : cat;
+      (tax ? ["0.236", "0.382", "0.500", "0.618", "0.705", "0.786"] : ["0.500", "0.618"]).forEach((k) => {
+        const v = f.levels[k]; if (v == null) return;
+        if (inR(v)) hline(v, col, tax ? [6, 3] : [2, 4], `${name} ${k}(${fmtP(v)})`, chartW * 0.45, tax ? 1.3 : 1);
+        else if (tax) (v > hi ? edges.up : edges.down).push({ v, k, name, col });
+      });
+    });
+    ["up", "down"].forEach((side) => {
+      const list = edges[side].sort((a, b) => Math.abs(a.v - lastPx) - Math.abs(b.v - lastPx)).slice(0, 2);
+      list.forEach((e, i) => {
+        const yy = side === "up" ? 14 + i * 14 : H - padB - 6 - i * 14;
+        c.font = "600 10px Inter, sans-serif"; c.fillStyle = e.col;
+        const pip = lastPx > 20 ? 0.01 : 0.0001;
+        c.fillText(`${side === "up" ? "▲" : "▼"} ${e.name} ${e.k} em ${fmtP(e.v)} (a ${Math.round(Math.abs(e.v - lastPx) / pip)} pips, fora do gráfico)`, chartW * 0.4, yy);
+      });
+    });
+    // Pullback: zona de valor 0,5–0,705 do último BOS e estado
+    const pbk = ch.pullback;
+    if (pbk && pbk.zone && pbk.state && pbk.state !== "sem rompimento") {
+      const zc = pbk.state === "pullback confirmado" ? "rgba(25,210,124,.16)" : pbk.state === "pullback falhou" ? "rgba(255,77,94,.12)" : "rgba(167,139,250,.12)";
+      box({ low: pbk.zone[0], high: pbk.zone[1], ts: pbk.bos ? pbk.bos.ts : t0 }, zc, `PULLBACK · ${pbk.state.toUpperCase()}`, "#c4b5fd");
+    }
     // liquidez: multi-temporalidade, equal highs/lows, strong/weak
     (ch.mtf_levels || []).forEach((lv) => hline(lv.price, "#9b8cff", [7, 4], lv.label, 0, 1, true));
     (ch.pools || []).filter((p) => (p.count || 1) > 1).slice(0, 4).forEach((p) => hline(p.price, "#7aa7ff", [2, 3], p.kind === "Equal Highs" ? "EQH" : p.kind === "Equal Lows" ? "EQL" : "LIQUIDEZ", chartW * 0.35));

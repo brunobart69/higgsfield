@@ -1,6 +1,8 @@
 """Agentes 01 a 10 — especialistas."""
 from __future__ import annotations
 
+from typing import Optional
+
 from .. import indicators as ind
 from ..context import MarketContext
 from ..data.news import IMPACT_PT, IMPACT_RANK
@@ -506,6 +508,11 @@ class FibonacciAgent(Agent):
                     lo, hi, d = ctx.memory.fib_anchor(ctx.asset, tf, ref_ts, lo, hi, d)
             cats[name] = {"tf": tf, "low": lo, "high": hi, "dir": d, "ref": ref, "ref_ts": ref_ts,
                           "label": self.LABEL[name], "levels": ind.fib_levels(lo, hi, d)}
+        for t in dict.fromkeys([ctx.focus_tf, "M5" if ctx.focus_tf == "M1" else ctx.focus_tf]):
+            lf = leg_fib(ctx, t) if ctx.enough(t, 60) else None
+            if lf:
+                cats[f"PERNA {t}"] = lf
+                self.LABEL[f"PERNA {t}"] = f"PERNA ATUAL {t}"
         rep.data["categories"] = cats
         missing = [k for k, v in cats.items() if v is None]
         if missing:
@@ -514,12 +521,14 @@ class FibonacciAgent(Agent):
             rep.abstain = True
             return rep
         tol = 0.35 * atr
+        tol_leg = 0.25 * (ctx.atr(ctx.focus_tf) or atr)   # perna atual: tolerância da própria temporalidade
         near = []
         for name, c in cats.items():
             if not c:
                 continue
+            t_ = tol_leg if name.startswith("PERNA") else tol
             for lvl, val in c["levels"].items():
-                if not lvl.startswith("ext") and abs(val - price) <= tol:
+                if not lvl.startswith("ext") and abs(val - price) <= t_:
                     near.append((name, lvl, val, c["dir"]))
         rep.data["near_levels"] = [{"cat": n, "level": l, "price": v, "label": self.LABEL[n]} for n, l, v, _ in near]
         if near:
@@ -528,7 +537,9 @@ class FibonacciAgent(Agent):
             d = BULL if sum(dirs) > 0 else BEAR if sum(dirs) < 0 else NEUTRAL
             golden = any(l in ("0.618", "0.705", "0.500") for _, l, _, _ in near)
             q = min(1.0, 0.35 + 0.2 * len(cats_hit) + (0.15 if golden else 0))
-            w = {"DIAMANTE": 0.8, "OURO": 0.7, "PRATA": 0.6, "BRONZE": 0.5}[max(cats_hit, key=lambda n: ["BRONZE", "PRATA", "OURO", "DIAMANTE"].index(n))]
+            rank = ["PERNA M1", "PERNA M5", "PERNA M15", "BRONZE", "PRATA", "OURO", "DIAMANTE"]
+            w = {"DIAMANTE": 0.8, "OURO": 0.7, "PRATA": 0.6, "BRONZE": 0.5}.get(
+                max(cats_hit, key=lambda n: rank.index(n) if n in rank else 0), 0.4)
             txt = ", ".join(f"{self.LABEL[n]} {l}" for n, l, _, _ in near[:4])
             if d != NEUTRAL:
                 self.ev(rep, "fib_confluence", f"Preço em nível(is) de Fibonacci: {txt}"
@@ -1057,5 +1068,119 @@ class ResearchAgent(Agent):
         return rep
 
 
+# =========================================================================== 17
+def current_leg(ctx: MarketContext, tf: str):
+    """Perna atual: a que gerou o último rompimento; sem tendência definida, os dois últimos pivôs opostos."""
+    lg = RetracementAgent().leg(ctx, tf)
+    if lg:
+        return lg
+    sw = ctx.swings(tf)
+    if len(sw) < 2:
+        return None
+    b = sw[-1]
+    a = next((s for s in reversed(sw[:-1]) if s.kind != b.kind), None)
+    if a is None:
+        return None
+    return (a, b, 1 if b.kind == "H" else -1)
+
+
+def leg_fib(ctx: MarketContext, tf: str) -> Optional[dict]:
+    lg = current_leg(ctx, tf)
+    atr = ctx.atr(tf)
+    if not lg or not atr:
+        return None
+    a, b, d = lg
+    if abs(b.price - a.price) < 1.5 * atr:
+        return None
+    lo, hi = (a.price, b.price) if d == 1 else (b.price, a.price)
+    return {"tf": tf, "low": lo, "high": hi, "dir": d, "t1": a.ts, "t2": b.ts, "label": f"PERNA {tf}",
+            "ref": f"perna de {DIR_LABEL[d]} {tf}: {_fmt(a.price)} → {_fmt(b.price)}", "levels": ind.fib_levels(lo, hi, d)}
+
+
+class PullbackAgent(Agent):
+    code, number, name, group = "PB", 17, "Pullback", "pullback"
+    specialty = "Pullback após rompimento: reteste do nível rompido, zona 0,5–0,705, FVG/OB e retomada"
+    personality = "Paciente: não persegue o preço; espera ele voltar e mostrar que o rompimento se sustenta."
+    methodology = ("Depois de um BOS, mede a perna do impulso e acompanha o recuo. Pullback válido = preço volta à zona "
+                   "de valor (Fibonacci 0,5–0,705 da perna, reteste do nível rompido ou FVG/OB a favor) SEM fechar além da "
+                   "origem da perna e SEM CHoCH contra, e a última vela fechada mostra rejeição a favor do rompimento. "
+                   "Estados: aguardando pullback · em pullback · pullback confirmado · pullback falhou.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        tf = ctx.focus_tf
+        cs = ctx.candles(tf)
+        atr = ctx.atr(tf)
+        if not cs or len(cs) < 80 or not atr:
+            rep.abstain = True
+            return rep
+        st = ctx.structure(tf)
+        bos = [e for e in st.events if e.kind == "BOS"]
+        if not bos:
+            rep.summary = "Sem BOS recente: não há rompimento para esperar pullback."
+            rep.data["state"] = "sem rompimento"
+            return rep
+        e = bos[-1]
+        d = e.direction
+        n = len(cs)
+        after = cs[e.idx:]
+        ext = max(c.high for c in after) if d == 1 else min(c.low for c in after)
+        seg = cs[max(0, e.idx - 60):e.idx + 1]
+        origin = min(c.low for c in seg) if d == 1 else max(c.high for c in seg)
+        rng = abs(ext - origin)
+        if rng < 1.5 * atr:
+            rep.summary = "Impulso pequeno demais para medir pullback."
+            return rep
+        price = cs[-1].close
+        retr = (ext - price) / rng if d == 1 else (price - ext) / rng
+        lo, hi = (origin, ext) if d == 1 else (ext, origin)
+        fib = ind.fib_levels(lo, hi, d)
+        z1, z2 = sorted((fib["0.500"], fib["0.705"]))
+        later_choch = [x for x in st.events if x.idx > e.idx and x.kind == "CHOCH" and x.direction == -d]
+        broke_origin = (price < origin) if d == 1 else (price > origin)
+        rep.data.update({"bos": {"ts": e.ts, "level": e.level, "dir": d}, "leg": {"origin": origin, "extreme": ext,
+                         "t1": seg[0].ts if seg else e.ts, "t2": e.ts}, "retr": round(retr, 3), "zone": [z1, z2],
+                         "fib": {k: fib[k] for k in ("0.382", "0.500", "0.618", "0.705", "0.786")}})
+        if later_choch or broke_origin:
+            rep.data["state"] = "pullback falhou"
+            self.ev(rep, "pullback_failed", f"Pullback do BOS de {DIR_LABEL[d]} falhou "
+                                            f"({'CHoCH contra' if later_choch else 'fechou além da origem da perna'})",
+                    -d, 0.35, 0.55, tf)
+            return rep
+        confl = []
+        if z1 - 0.15 * atr <= price <= z2 + 0.15 * atr:
+            confl.append(f"zona 0,5–0,705 da perna ({_fmt(z1)}–{_fmt(z2)})")
+        if abs(price - e.level) <= 0.35 * atr:
+            confl.append(f"reteste do nível rompido {_fmt(e.level)}")
+        for z in ind.fair_value_gaps(cs[-120:], 0.15 * atr):
+            if not z.mitigated and z.direction == d and z.low - 0.2 * atr <= price <= z.high + 0.2 * atr:
+                confl.append(f"FVG a favor [{_fmt(z.low)}–{_fmt(z.high)}]")
+                break
+        if retr < 0.236:
+            rep.data["state"] = "aguardando pullback"
+            rep.summary = (f"BOS de {DIR_LABEL[d]} em {_fmt(e.level)}; preço ainda perto do extremo — aguardando o "
+                           f"pullback para a zona {_fmt(z1)}–{_fmt(z2)}.")
+            return rep
+        last = cs[-1]
+        rejection = ind.wick_rejection(last) == d or ((last.close - last.open) * d > 0 and last.body > 0.4 * last.range)
+        ctx_tf = "M5" if tf == "M1" else "M15" if tf == "M5" else "H1"
+        htf = ctx.structure(ctx_tf).trend if ctx.enough(ctx_tf, 60) else 0
+        if htf == d:
+            confl.append(f"tendência {ctx_tf} a favor")
+        if confl and rejection:
+            rep.data["state"] = "pullback confirmado"
+            q = min(1.0, 0.4 + 0.15 * len(confl))
+            self.ev(rep, "pullback_confirmed", f"Pullback confirmado no BOS de {DIR_LABEL[d]}: recuo de {retr:.0%}, "
+                                               + "; ".join(confl) + ", rejeição na última vela fechada", d, 0.65, q, tf)
+        elif confl:
+            rep.data["state"] = "em pullback"
+            rep.warnings.append(f"Em pullback ({retr:.0%}) na região de valor ({'; '.join(confl)}) — falta a vela de rejeição.")
+            self.ev(rep, "pullback_zone", f"Preço em pullback na região de valor do BOS de {DIR_LABEL[d]}", d, 0.3, 0.45, tf)
+        else:
+            rep.data["state"] = "em pullback"
+            rep.summary = f"Recuo de {retr:.0%} do BOS de {DIR_LABEL[d]}, ainda fora da região de valor ({_fmt(z1)}–{_fmt(z2)})."
+        return rep
+
+
 SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
-               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent, TimingAgent, ResearchAgent]
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent, TimingAgent, ResearchAgent, PullbackAgent]
