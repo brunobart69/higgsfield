@@ -1,0 +1,25 @@
+Traceback (most recent call last):
+  File "/home/user/higgsfield/trading-office/tio/data/providers.py", line 238, in __init__
+    ok = mt5.initialize()
+  File "/home/user/higgsfield/trading-office/tio/data/mt5_bridge.py", line 114, in <lambda>
+    return lambda *a, **k: self.call(name, *a, **k)
+                           ~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/user/higgsfield/trading-office/tio/data/mt5_bridge.py", line 92, in call
+    res = self._send(name, args, kwargs, SLOW.get(name, 20))
+  File "/home/user/higgsfield/trading-office/tio/data/mt5_bridge.py", line 101, in _send
+    raise MT5Timeout(f"O MetaTrader 5 não respondeu a '{name}' em {timeout} segundos.")
+tio.data.mt5_bridge.MT5Timeout: O MetaTrader 5 não respondeu a 'initialize' em 4 segundos.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/higgsfield/trading-office/tio/server.py", line 214, in init
+    s = factory()
+  File "/tmp/claude-0/e2e/run_e2e.py", line 10, in fac
+    return OfficeService(provider=MT5Provider(module=mb.ProcessMT5(target=hang_worker.worker)))
+                                  ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/higgsfield/trading-office/tio/data/providers.py", line 240, in __init__
+    raise RuntimeError("O MetaTrader 5 não respondeu. Verifique: (1) o MT5 está aberto e logado; (2) não há janela de "
+                       "aviso/atualização aberta dentro do MT5; (3) se houver mais de um MT5 instalado, deixe aberto só "
+                       "o da sua corretora. Depois feche esta janela e abra de novo.")
+RuntimeError: O MetaTrader 5 não respondeu. Verifique: (1) o MT5 está aberto e logado; (2) não há janela de aviso/atualização aberta dentro do MT5; (3) se houver mais de um MT5 instalado, deixe aberto só o da sua corretora. Depois feche esta janela e abra de novo.
