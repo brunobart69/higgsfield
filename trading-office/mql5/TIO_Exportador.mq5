@@ -8,11 +8,11 @@
 //| (Files\TIO), de onde o escritorio os le.                         |
 //+------------------------------------------------------------------+
 #property copyright   "AI Trading Intelligence Office"
-#property version     "1.11"
+#property version     "1.20"
 #property description "Exporta indicadores para o AI Trading Intelligence Office. Nao envia ordens."
 
 input int IntervaloSegundos = 5;    // frequencia de exportacao (s)
-input int Barras            = 600;  // barras fechadas exportadas
+input int Barras            = 300;  // barras fechadas exportadas
 
 #define MAXBUF 8
 
@@ -132,6 +132,12 @@ void ExportOne(int k, string sym, ENUM_TIMEFRAMES tf, string tfn, string ind)
    int h = g_handle[k];
    if(h == INVALID_HANDLE || BarsCalculated(h) <= 0)
       return;
+   // só trabalha quando FECHA uma vela nova (antes regravava tudo a cada 5 s e pesava no terminal)
+   datetime lb[];
+   if(CopyTime(sym, tf, 1, 1, lb) != 1)
+      return;
+   if(lb[0] == g_last[k])
+      return;
    int bars = MathMin(Barras, Bars(sym, tf) - 2);
    if(bars <= 10)
       return;
@@ -189,6 +195,28 @@ void ExportOne(int k, string sym, ENUM_TIMEFRAMES tf, string tfn, string ind)
      }
   }
 
+long     g_ch_id[];
+int      g_ch_total[];
+datetime g_ch_time[];
+string   g_ch_text[];
+
+int ChartSlot(long id)
+  {
+   for(int i = 0; i < ArraySize(g_ch_id); i++)
+      if(g_ch_id[i] == id)
+         return i;
+   int n = ArraySize(g_ch_id);
+   ArrayResize(g_ch_id, n + 1);
+   ArrayResize(g_ch_total, n + 1);
+   ArrayResize(g_ch_time, n + 1);
+   ArrayResize(g_ch_text, n + 1);
+   g_ch_id[n] = id;
+   g_ch_total[n] = -1;
+   g_ch_time[n] = 0;
+   g_ch_text[n] = "";
+   return n;
+  }
+
 string Clean(string s)
   {
    string r = s;
@@ -226,7 +254,15 @@ void ExportObjects()
             inds += Clean(ChartIndicatorName(ch, w, j)) + "|";
       FileWriteString(ch_h, IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + inds + "\r\n");
       int total = ObjectsTotal(ch, -1, -1);
-      int lim = MathMin(total, 1500);
+      int slot = ChartSlot(ch);
+      if(g_ch_total[slot] == total && TimeLocal() - g_ch_time[slot] < 300)
+        {
+         FileWriteString(fh, g_ch_text[slot]);   // gráfico sem mudanças: reaproveita (não consulta os objetos de novo)
+         ch = ChartNext(ch);
+         continue;
+        }
+      string buf = "";
+      int lim = MathMin(total, 800);
       for(int i = 0; i < lim; i++)
         {
          string name = ObjectName(ch, i, -1, -1);
@@ -252,10 +288,14 @@ void ExportObjects()
                lvls += DoubleToString(ObjectGetDouble(ch, name, OBJPROP_LEVELVALUE, k2), 3) + " ";
             text = text + " FIBO[" + lvls + "]";
            }
-         FileWriteString(fh, IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + Clean(name) + "\t" +
-                         EnumToString(tp) + "\t" + text + "\t" + IntegerToString(t1) + "\t" + DoubleToString(p1, 8) + "\t" +
-                         IntegerToString(t2) + "\t" + DoubleToString(p2, 8) + "\t" + IntegerToString(clr) + "\r\n");
+         buf += IntegerToString(ch) + "\t" + sym + "\t" + IntegerToString(per) + "\t" + Clean(name) + "\t" +
+                EnumToString(tp) + "\t" + text + "\t" + IntegerToString(t1) + "\t" + DoubleToString(p1, 8) + "\t" +
+                IntegerToString(t2) + "\t" + DoubleToString(p2, 8) + "\t" + IntegerToString(clr) + "\r\n";
         }
+      g_ch_total[slot] = total;
+      g_ch_time[slot] = TimeLocal();
+      g_ch_text[slot] = buf;
+      FileWriteString(fh, buf);
       ch = ChartNext(ch);
      }
    FileClose(fh);
@@ -266,8 +306,8 @@ int g_tick = 0;
 
 void ExportAll()
   {
-   if(g_tick % 6 == 0)
-      ExportObjects();   // objetos dos gráficos a cada ~30 s (operação mais pesada para o terminal)
+   if(g_tick % 12 == 0)
+      ExportObjects();   // objetos dos gráficos a cada ~60 s; gráficos sem mudança são reaproveitados
    g_tick++;
    int nt = ArraySize(g_tf);
    int k = 0;

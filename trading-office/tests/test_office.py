@@ -484,3 +484,42 @@ def test_pullback_after_bos_and_leg_fibonacci():
     assert pb["data"]["bos"]["dir"] == 1 and 0.236 <= pb["data"]["retr"] <= 0.9
     fib = next(r for r in res["reports"] if r["agent"] == "FIB")
     assert "PERNA M15" in fib["data"]["categories"]
+
+
+def test_mt5_polling_is_light(monkeypatch, tmp_path):
+    """Sem vela nova, o escritório não volta a consultar o terminal; com vela nova, pede só as últimas."""
+    import time as _t
+    import types
+    import numpy as np
+    from tio.data.providers import MT5Provider
+    from tio.service import OfficeService
+    OfficeService.PREFS_PATH = tmp_path / "p.json"
+    now = int(_t.time())
+    calls = []
+
+    def rates(sym, tf, start, count):
+        calls.append((tf, count))
+        sec = {1: 60, 5: 300, 15: 900}.get(tf, 3600)
+        last = now - now % sec              # vela em formação (ainda não fechou)
+        n = min(count, 500)
+        return np.array([(last - (n - 1 - i) * sec, 1.1, 1.1005, 1.0995, 1.1001, 5, 0, 0) for i in range(n)],
+                        dtype=[("time", "i8"), ("open", "f8"), ("high", "f8"), ("low", "f8"), ("close", "f8"),
+                               ("tick_volume", "i8"), ("spread", "i4"), ("real_volume", "i8")])
+    fake = types.SimpleNamespace(
+        TIMEFRAME_M1=1, TIMEFRAME_M5=5, TIMEFRAME_M15=15, TIMEFRAME_M30=30, TIMEFRAME_H1=60, TIMEFRAME_H4=240,
+        TIMEFRAME_D1=1440, TIMEFRAME_W1=10080, TIMEFRAME_MN1=43200, initialize=lambda: True, last_error=lambda: None,
+        account_info=lambda: types.SimpleNamespace(server="Demo"), terminal_info=lambda: None, symbol_info=lambda s: object(),
+        symbols_get=lambda: [], symbol_select=lambda s, v: True, symbol_info_tick=lambda s: types.SimpleNamespace(time=now),
+        copy_rates_from_pos=rates)
+    svc = OfficeService(provider=MT5Provider(module=fake), memory=Memory(":memory:"))
+    svc.data("EURUSD", "M1")
+    first = len(calls)
+    for _ in range(20):
+        svc.data("EURUSD", "M1")
+    assert len(calls) == first          # nenhuma consulta nova enquanto a vela não fecha
+    k = ("EURUSD", "M1")
+    f, s, full = svc._series[k]
+    s.candles[-1].close_ts = now - 5     # simula o fechamento da vela M1
+    svc.data("EURUSD", "M1")
+    assert calls[-1] == (1, 40)         # incremental: só as últimas 40 velas
+    OfficeService.PREFS_PATH = None

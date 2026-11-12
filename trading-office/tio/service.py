@@ -142,15 +142,37 @@ class OfficeService:
 
     # ------------------------------------------------------------------ dados
     def _series_cached(self, asset: str, tf: str):
+        """Com o MT5: só consulta o terminal quando uma vela nova deve ter fechado, e pede só as últimas velas."""
         k = (asset, tf)
         hit = self._series.get(k)
-        if hit and time.time() - hit[0] < CACHE_TTL.get(tf, 60):
+        now = time.time()
+        incremental = hasattr(self.provider, "load_recent")
+        if hit and not incremental and now - hit[0] < CACHE_TTL.get(tf, 60):
             return hit[1]
+        if hit and incremental:
+            fetched, srs, full_at = hit
+            if srs is None and now - fetched < 120:
+                return None
+            if srs is not None and len(srs):
+                if now < srs.candles[-1].close_ts + 1.5:      # a vela atual ainda não fechou: nada novo
+                    return srs
+                if now - full_at < 1800:                      # atualização incremental (últimas 40 velas)
+                    try:
+                        rec = self.provider.load_recent(asset, tf, 40)
+                    except Exception:
+                        rec = None
+                    if rec is not None and len(rec):
+                        first = rec.candles[0].ts
+                        merged = [c for c in srs.candles if c.ts < first] + rec.candles
+                        from .models import Series
+                        srs = Series(srs.asset, srs.timeframe, merged[-6000:], srs.source, srs.synthetic, srs.volume_kind)
+                        self._series[k] = (now, srs, full_at)
+                        return srs
         try:
             srs = self.provider.load(asset, tf)
         except Exception:  # fonte indisponível para esta TF
             srs = None
-        self._series[k] = (time.time(), srs)
+        self._series[k] = (now, srs, now) if incremental else (now, srs)
         return srs
 
     def data(self, asset: str, tf: Optional[str] = None) -> Optional[MarketData]:

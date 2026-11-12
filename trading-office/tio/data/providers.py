@@ -407,12 +407,16 @@ class MT5Provider(Provider):
 
     COUNT = {"MN": 120, "W1": 260, "D1": 500, "H4": 1500, "H1": 3000}   # menos histórico nas TFs longas (carrega mais rápido)
 
-    def load(self, asset: str, tf: str, count: int = 6000) -> Optional[Series]:
+    def load_recent(self, asset: str, tf: str, n: int = 30) -> Optional[Series]:
+        """Só as últimas velas (atualização incremental, muito mais leve para o terminal)."""
+        return self.load(asset, tf, count=n, _recent=True)
+
+    def load(self, asset: str, tf: str, count: int = 6000, _recent: bool = False) -> Optional[Series]:
         sym = self.symbol(asset)
         if sym is None or tf not in self.TF:
             return None
         try:
-            rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, min(count, self.COUNT.get(tf, count)))
+            rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, count if _recent else min(count, self.COUNT.get(tf, count)))
         except Exception as e:
             print(f" · MT5: {asset} {tf} indisponível ({e})", flush=True)
             return None
