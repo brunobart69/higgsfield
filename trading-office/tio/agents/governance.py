@@ -75,6 +75,10 @@ class RiskManager(Agent):
             ratio = atrs[-1] / med if med else 1
             chk(p.volatility_min_mult <= ratio <= p.volatility_max_mult,
                 f"Volatilidade (ATR/mediana) = {ratio:.2f} (faixa aceita {p.volatility_min_mult}–{p.volatility_max_mult}).")
+        if p.allowed_hours is not None:
+            hour = (ctx.as_of // 3600) % 24
+            chk(hour in p.allowed_hours, f"Hora de entrada {hour:02d}h UTC "
+                + ("dentro do filtro de horário." if hour in p.allowed_hours else "FORA do filtro de horário escolhido."))
         if draft.get("news_avoid"):
             chk(False, "Evento de alto impacto na janela: operação vetada.")
         if ctx.data.synthetic:

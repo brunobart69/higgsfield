@@ -18,6 +18,7 @@ CRITERIA = [
     ("structure", "Confirmação de Price Action", 15),
     ("liquidity", "Varredura / alvo de liquidez", 13),
     ("zones", "Região de suporte ou resistência", 12),
+    ("trendline", "Linha de tendência (LTA/LTB)", 8),
     ("fib", "Retração Fibonacci", 10),
     ("reversal", "Exaustão / reversão confirmada", 10),
     ("momentum", "RSI", 8),

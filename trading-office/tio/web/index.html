@@ -12,10 +12,12 @@
 <header class="top">
   <div class="brand"><span class="logo">◆</span><div><b>AI TRADING INTELLIGENCE OFFICE</b><small>Central de análise · uso educacional · sem execução real</small></div></div>
   <nav id="tabs">
-    <button data-tab="multi" class="on">Multi-Pares</button>
+    <button data-tab="escritorio" class="on">Escritório</button>
+    <button data-tab="multi">Multi-Pares</button>
     <button data-tab="painel">Painel</button>
     <button data-tab="sala">Sala de Operações</button>
     <button data-tab="lab">Laboratório</button>
+    <button data-tab="horas">Horários</button>
     <button data-tab="memoria">Memória &amp; Evolução</button>
     <button data-tab="mt5">MT5</button>
   </nav>
@@ -25,7 +27,23 @@
 <div id="banner" class="banner hidden"></div>
 
 <!-- ============================ PAINEL ============================ -->
-<main id="multi" class="tab on">
+<main id="escritorio" class="tab on">
+  <div class="office-bar">
+    <div id="office-status" class="small">carregando…</div>
+    <div class="office-actions"><button class="ghost" id="office-speed">Velocidade 1×</button><button class="primary" id="office-meet">Convocar reunião</button></div>
+  </div>
+  <section class="office">
+    <div class="office-floor"><canvas id="office-canvas" aria-label="Planta do escritório com os agentes"></canvas></div>
+    <aside class="office-side card">
+      <div id="office-panel"></div>
+      <form id="office-form"><input id="office-input" autocomplete="off" placeholder="Fale com a pessoa selecionada…"><button>Enviar</button></form>
+      <h3>Conversas no escritório</h3>
+      <div id="office-feed" class="office-feed"></div>
+    </aside>
+  </section>
+</main>
+
+<main id="multi" class="tab">
   <div class="multi-head">
     <div><h2>Todos os pares ao mesmo tempo</h2><p class="muted small" id="multi-info">carregando…</p></div>
     <div class="multi-sum" id="multi-sum"></div>
@@ -39,7 +57,7 @@
       <div class="ch"><h2>1 · Mercado atual</h2><select id="asset"></select></div>
       <div class="price-row"><div id="px" class="px">—</div><div id="decision" class="pill">—</div></div>
       <canvas id="chart" height="340"></canvas>
-      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg fib">Fibonacci</span></div>
+      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg fib">Fibonacci</span><span class="lg tl">LTA / LTB</span></div>
     </div>
     <div class="card" id="c-decision">
       <div class="ch"><h2>11 · Decisão coletiva</h2></div>
@@ -111,6 +129,30 @@
   </section>
 </main>
 
+<!-- ============================ HORÁRIOS ============================ -->
+<main id="horas" class="tab">
+  <section class="grid">
+    <div class="card span3">
+      <div class="ch"><h2>Acerto por hora de entrada</h2>
+        <div class="office-actions"><select id="hours-tf"></select><select id="hours-src"><option value="hyp">todas as reuniões (mais amostra)</option><option value="trades">só operações simuladas</option></select></div></div>
+      <p class="small muted" id="hours-note"></p>
+      <div class="table-wrap"><div id="hours-grid" class="hours-grid"></div></div>
+      <p class="small muted">Cores: verde = acima do ponto de equilíbrio do payout, vermelho = abaixo; células apagadas têm menos de 10 registros. Clique nas horas para montar o filtro.</p>
+    </div>
+    <div class="card span2">
+      <div class="ch"><h2>Filtro de horário</h2></div>
+      <p class="small">Com o filtro ligado, o Risk Manager só aprova operações simuladas nas horas marcadas. As horas aparecem no seu horário local e em UTC.</p>
+      <div id="hours-pick" class="hours-pick"></div>
+      <div class="office-actions" style="margin-top:10px"><button class="ghost" id="hours-suggest">Sugerir melhores horas</button><button class="ghost" id="hours-off">Desligar filtro</button><button class="primary" id="hours-save">Ligar filtro com as horas marcadas</button></div>
+      <p class="small" id="hours-status"></p>
+    </div>
+    <div class="card">
+      <div class="ch"><h2>Cuidado com horas "sortudas"</h2></div>
+      <p class="small">Com 24 horas, algumas vão parecer ótimas por acaso. A sugestão usa o limite inferior do intervalo de confiança (não a média) e exige pelo menos 20 registros. O ciclo de aprendizado também testa um filtro de horário e só o adota se ele melhorar <b>fora da amostra</b>.</p>
+    </div>
+  </section>
+</main>
+
 <!-- ============================ MT5 ============================ -->
 <main id="mt5" class="tab">
   <section class="grid">
@@ -155,5 +197,6 @@
 
 <footer>Sistema educacional. Não executa operações com dinheiro real, não promete lucros e não inventa dados de mercado. Pontuação de confluência não é probabilidade de acerto.</footer>
 <script src="app.js"></script>
+<script src="office.js"></script>
 </body>
 </html>

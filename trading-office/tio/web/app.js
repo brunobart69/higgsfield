@@ -24,6 +24,8 @@ $$("#tabs button").forEach((b) => b.onclick = () => {
   if (b.dataset.tab === "painel" && S.analysis) drawAll();
   if (b.dataset.tab === "multi") loadMulti();
   if (b.dataset.tab === "mt5") loadMT5();
+  if (b.dataset.tab === "horas") loadHours();
+  if (window.OFFICE) { if (b.dataset.tab === "escritorio") window.OFFICE.show(); else window.OFFICE.hide(); }
 });
 const activeTab = () => ($(".tab.on") || {}).id;
 
@@ -57,6 +59,17 @@ function drawChart(an) {
   line(ch.poc, css("--amber"), [], "POC");
   Object.entries(ch.fib || {}).forEach(([cat, f]) => {
     ["0.382", "0.500", "0.618"].forEach((k) => line(f.levels[k], "rgba(111,211,196,.55)", [2, 4], `${cat} ${k}`));
+  });
+  const tsx = (ts) => { // posição x de um instante (interpolação nos candles do gráfico)
+    if (ts <= cs[0][0]) return bw / 2; if (ts >= cs[cs.length - 1][0]) return (cs.length - 1) * bw + bw / 2;
+    let i = cs.findIndex((k) => k[0] >= ts); const a = cs[i - 1][0], b = cs[i][0];
+    return (i - 1 + (ts - a) / (b - a)) * bw + bw / 2;
+  };
+  (ch.trendlines || []).forEach((l) => {
+    const x1 = tsx(l.t1), x2 = tsx(l.t2); if (l.t1 < cs[0][0]) return;
+    c.strokeStyle = l.kind === "LTA" ? css("--green") : css("--red"); c.lineWidth = 1.6; c.setLineDash([]);
+    c.beginPath(); c.moveTo(x1, y(l.p1)); c.lineTo(x2, y(l.p2)); c.stroke(); c.lineWidth = 1;
+    c.fillStyle = c.strokeStyle; c.fillText(`${l.kind} ${l.tf}`, Math.min(x2 - 40, W - padR - 60), y(l.p2) - 4);
   });
   (ch.pools || []).filter((p) => (p.count || 1) > 1).slice(0, 4).forEach((p) => line(p.price, "rgba(180,140,255,.7)", [6, 4], `${p.kind}`));
   cs.forEach((k, i) => {
@@ -130,7 +143,7 @@ async function loadStatus() {
   if (!st.news_loaded) msgs.push("Calendário econômico não carregado: o contexto macro aparece como “não avaliado”.");
   b.innerHTML = msgs.map(esc).join("<br>"); b.classList.toggle("hidden", !msgs.length);
   const sel = $("#asset"); sel.innerHTML = st.assets.map((a) => `<option value="${a}">${a.slice(0, 3)}/${a.slice(3)}</option>`).join("");
-  sel.value = S.asset; sel.onchange = () => { S.asset = sel.value; loadAnalysis(); };
+  sel.value = S.asset; sel.onchange = () => { S.asset = sel.value; loadAnalysis(); if (window.OFFICE) window.OFFICE.assetChanged(); };
   $("#bt-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i === 0 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");
   $("#learn-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i < 3 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");
   $("#bt-strategy").innerHTML = st.strategies.map((s) => `<option>${s}</option>`).join("");
@@ -139,7 +152,7 @@ async function loadStatus() {
   $$("#tfsel button").forEach((b) => b.onclick = () => {
     S.tf = b.dataset.tf; try { localStorage.setItem("tio_tf", S.tf); } catch (e) { /* ignore */ }
     $$("#tfsel button").forEach((x) => x.classList.toggle("on", x === b)); S.chatShown = null;
-    loadAnalysis(); loadOverview(); if (activeTab() === "multi") loadMulti();
+    loadAnalysis(); loadOverview(); if (activeTab() === "multi") loadMulti(); if (window.OFFICE) window.OFFICE.assetChanged();
   });
   const ap = st.autopilot || {};
   $("#meta").textContent = `${st.source || "sem fonte"} · último candle ${st.last_candle || "—"} · modelo ${st.model_version}` +
@@ -395,11 +408,51 @@ $("#mt5-save").onclick = async () => {
   setTimeout(() => { $("#mt5-save").textContent = "Salvar escolha"; loadMT5(); }, 1500);
 };
 
+// ------------------------------------------------------------------ horários
+const HRS = { data: null, picked: new Set() };
+const localHour = (h) => { const d = new Date(Date.UTC(2026, 0, 5, h)); return d.getHours(); };
+async function loadHours() {
+  const h = await api("/api/hours"); HRS.data = h;
+  const tfs = Object.keys(h.grid || {}).sort((a, b) => (a === "TODAS") - (b === "TODAS"));
+  const sel = $("#hours-tf"); const cur = sel.value;
+  sel.innerHTML = (tfs.length ? tfs : ["TODAS"]).map((t) => `<option ${t === (cur || S.tf) ? "selected" : ""}>${t}</option>`).join("");
+  if (!HRS.init) { HRS.init = true; (h.filter.hours || []).forEach((x) => HRS.picked.add(x)); }
+  renderHours();
+}
+function renderHours() {
+  const h = HRS.data; if (!h) return;
+  const src = $("#hours-src").value; const be = h.breakeven;
+  $("#hours-note").innerHTML = `${esc(h.note)} Ponto de equilíbrio do payout: <b>${pct(be)}</b>. Filtro atual: ${h.filter.enabled ? `<b class="up">ligado</b> (${h.filter.hours.map((x) => String(x).padStart(2, "0") + "h").join(", ")} UTC)` : "desligado"}.`;
+  const rows = Object.keys(h.grid).length ? Object.keys(h.grid) : [];
+  const head = `<div class="hl">UTC<br>local</div>` + Array.from({ length: 24 }, (_, i) => `<div class="hh">${String(i).padStart(2, "0")}<br>${String(localHour(i)).padStart(2, "0")}</div>`).join("");
+  const body = rows.map((tf) => `<div class="hl">${tf}</div>` + Array.from({ length: 24 }, (_, i) => {
+    const c = (h.grid[tf][i] || {})[src]; if (!c || !c.n) return `<div class="hc" data-h="${i}" style="opacity:.35">—</div>`;
+    const good = c.rate > be; const strong = c.n >= 10; const a = strong ? Math.min(0.75, 0.2 + Math.abs(c.rate - be) * 3) : 0.12;
+    const bg = good ? `rgba(25,210,124,${a})` : `rgba(255,77,94,${a})`;
+    return `<div class="hc ${HRS.picked.has(i) ? "sel" : ""}" data-h="${i}" style="background:${bg}" title="${tf} ${i}h UTC: ${c.wins}/${c.n} (${pct(c.rate)}), IC95% ${pct(c.ci[0], 0)}–${pct(c.ci[1], 0)}">${pct(c.rate, 0)}<br><span class="muted">${c.n}</span></div>`;
+  }).join("")).join("");
+  $("#hours-grid").className = rows.length ? "hours-grid" : "";
+  $("#hours-grid").innerHTML = rows.length ? head + body : `<p class="muted small">Ainda não há registros. Deixe o treino automático rodando: cada reunião vira um registro por hora quando a expiração chega.</p>`;
+  $$("#hours-grid .hc").forEach((el) => el.onclick = () => { const x = +el.dataset.h; HRS.picked.has(x) ? HRS.picked.delete(x) : HRS.picked.add(x); renderHours(); });
+  $("#hours-pick").innerHTML = Array.from({ length: 24 }, (_, i) => `<label><input type="checkbox" value="${i}" ${HRS.picked.has(i) ? "checked" : ""}>${String(localHour(i)).padStart(2, "0")}h<small>${String(i).padStart(2, "0")} UTC</small></label>`).join("");
+  $$("#hours-pick input").forEach((el) => el.onchange = () => { const x = +el.value; el.checked ? HRS.picked.add(x) : HRS.picked.delete(x); renderHours(); });
+}
+$("#hours-tf").onchange = renderHours; $("#hours-src").onchange = renderHours;
+$("#hours-suggest").onclick = () => {
+  const h = HRS.data; if (!h) return; const tf = $("#hours-tf").value; const src = $("#hours-src").value; const g = (h.grid || {})[tf] || {};
+  const best = Object.entries(g).map(([hr, v]) => [+hr, v[src]]).filter(([, v]) => v && v.n >= 20 && v.ci[0] > h.breakeven - 0.05).sort((a, b) => b[1].ci[0] - a[1].ci[0]);
+  HRS.picked = new Set(best.slice(0, 8).map(([hr]) => hr)); renderHours();
+  $("#hours-status").textContent = best.length ? `Sugeridas ${best.length > 8 ? 8 : best.length} horas com limite inferior de confiança mais alto (mín. 20 registros).` : "Ainda não há horas com amostra suficiente (mín. 20 registros) para sugerir.";
+};
+$("#hours-save").onclick = async () => { const r = await post("/api/hours/filter", { enabled: true, hours: [...HRS.picked] }); $("#hours-status").textContent = r.enabled ? `Filtro ligado: ${r.hours.length} horas.` : "Marque pelo menos uma hora."; loadHours(); };
+$("#hours-off").onclick = async () => { await post("/api/hours/filter", { enabled: false, hours: [...HRS.picked] }); $("#hours-status").textContent = "Filtro desligado."; loadHours(); };
+
 // ------------------------------------------------------------------ boot
 $("#refresh").onclick = () => { loadOverview(); loadAnalysis(); loadHistory(); };
 window.addEventListener("resize", () => { if (S.analysis && $("#painel").classList.contains("on")) drawAll(); });
 (async () => {
-  await loadStatus(); await loadAgents(); loadMulti(); await loadAnalysis(); loadOverview(); loadHistory();
+  await loadStatus(); await loadAgents(); if (window.OFFICE && activeTab() === "escritorio") window.OFFICE.show();
+  loadMulti(); await loadAnalysis(); loadOverview(); loadHistory();
   setInterval(() => { const t = activeTab(); if (t === "multi") loadMulti(); else if (t === "painel") { loadAnalysis(); loadHistory(); } }, 15000);
   setInterval(() => { loadStatus(); if (activeTab() === "mt5") loadMT5(); }, 30000);
 })();

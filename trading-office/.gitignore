@@ -4,3 +4,5 @@ data/market/*.meta.json
 data/news/*.json
 __pycache__/
 .pytest_cache/
+data/settings.json
+data/mt5_indicators.json

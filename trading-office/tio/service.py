@@ -42,6 +42,33 @@ class OfficeService:
         self.office = Office()
         self.jobs: dict[str, dict] = {}
         self.autopilot = {"running": False, "cycles": 0, "last": None, "errors": []}
+        self.prefs = self._load_prefs()
+
+    # ------------------------------------------------------------------ preferências do usuário
+    PREFS_PATH = None
+
+    def _prefs_path(self):
+        from .data.providers import DATA_DIR
+        return self.PREFS_PATH or (DATA_DIR / "settings.json")
+
+    def _load_prefs(self) -> dict:
+        try:
+            return json.loads(self._prefs_path().read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save_prefs(self) -> None:
+        p = self._prefs_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self.prefs, indent=2))
+
+    def params(self):
+        """Parâmetros da versão ativa + filtro de horário escolhido pelo usuário (se houver)."""
+        version, params = self.memory.active_version()
+        hf = self.prefs.get("hour_filter")
+        if hf and hf.get("enabled") and hf.get("hours"):
+            params.allowed_hours = sorted(int(h) for h in hf["hours"])
+        return version, params
 
     # ------------------------------------------------------------------ dados
     def _series_cached(self, asset: str, tf: str):
@@ -124,8 +151,8 @@ class OfficeService:
         md = self.data(asset, tf)
         if md is None:
             return {"error": f"Sem dados de {asset} em {tf} na fonte '{self.provider.name}'."}
-        version, params = self.memory.active_version()
-        key = (asset, tf, md.base[-1].close_ts, version)
+        version, params = self.params()
+        key = (asset, tf, md.base[-1].close_ts, version, tuple(params.allowed_hours or ()))
         with self.lock:
             if key in self._analysis:
                 return self._analysis[key]
@@ -182,6 +209,7 @@ class OfficeService:
         ov["order_blocks"] = rep.get("PA", {}).get("data", {}).get("order_blocks", [])
         fib = rep.get("FIB", {}).get("data", {}).get("categories", {}) or {}
         ov["fib"] = {k: v for k, v in fib.items() if v}
+        ov["trendlines"] = rep.get("TL", {}).get("data", {}).get("lines", [])
         return ov
 
     def overview(self, tf: Optional[str] = None) -> list[dict]:
@@ -259,6 +287,58 @@ class OfficeService:
         if body.get("tfs"):
             self.tfs = [t for t in body["tfs"] if t in TF_SECONDS] or self.tfs
         return {"tfs": self.tfs, "expiry": self.expiry}
+
+    # ------------------------------------------------------------------ horários
+    def hours(self) -> dict:
+        """Resultados por hora de entrada (UTC) e temporalidade: operações simuladas e avaliações hipotéticas."""
+        from .indicators import wilson
+        _, params = self.memory.active_version()
+        breakeven = 1 / (1 + params.payout)
+        rows = self.memory.q("SELECT mode, tf, direction, entry_ts, entry_price, exit_price, result FROM trades "
+                             "WHERE status='closed' AND mode IN ('live','live-shadow') AND entry_price IS NOT NULL")
+        grid: dict = {}
+        for r in rows:
+            if not r["direction"] or r["exit_price"] is None:
+                continue
+            h = int((r["entry_ts"] // 3600) % 24)
+            if r["mode"] == "live":
+                if r["result"] not in ("WIN", "LOSS"):
+                    continue
+                win = r["result"] == "WIN"
+                key = "trades"
+            else:
+                if r["exit_price"] == r["entry_price"]:
+                    continue
+                win = (r["exit_price"] - r["entry_price"]) * r["direction"] > 0
+                key = "hyp"
+            for tf in (r["tf"], "TODAS"):
+                cell = grid.setdefault(tf, {}).setdefault(h, {"trades": [0, 0], "hyp": [0, 0]})
+                cell[key][0] += int(win)
+                cell[key][1] += 1
+        out = {}
+        for tf, hrs in grid.items():
+            out[tf] = {}
+            for h, c in hrs.items():
+                d = {}
+                for k in ("trades", "hyp"):
+                    w, n = c[k]
+                    lo, hi = wilson(w, n)
+                    d[k] = {"wins": w, "n": n, "rate": (w / n) if n else None, "ci": [round(lo, 3), round(hi, 3)]}
+                out[tf][h] = d
+        bts = self.memory.backtests(1)
+        bt_hours = bts[0]["metrics"].get("by_hour") if bts else None
+        return {"grid": out, "breakeven": breakeven, "filter": self.prefs.get("hour_filter") or {"enabled": False, "hours": []},
+                "backtest_by_hour": bt_hours, "backtest_synthetic": bool(bts and bts[0]["synthetic"]),
+                "note": ("'trades' = operações simuladas aprovadas; 'hyp' = direção predominante de TODAS as reuniões "
+                         "(inclusive sem operação), útil para ter mais amostra. Horas em UTC.")}
+
+    def set_hour_filter(self, body: dict) -> dict:
+        hours = sorted({int(h) for h in body.get("hours", []) if 0 <= int(h) <= 23})
+        self.prefs["hour_filter"] = {"enabled": bool(body.get("enabled")) and bool(hours), "hours": hours}
+        self._save_prefs()
+        with self.lock:
+            self._analysis.clear()
+        return self.prefs["hour_filter"]
 
     # ------------------------------------------------------------------ MT5
     def mt5_info(self) -> dict:

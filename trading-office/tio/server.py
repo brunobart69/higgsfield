@@ -47,6 +47,8 @@ def make_handler(svc: OfficeService):
                     return self._json(svc.overview(tf))
                 if u.path == "/api/scan":
                     return self._json(svc.scan(tf))
+                if u.path == "/api/hours":
+                    return self._json(svc.hours())
                 if u.path == "/api/mt5":
                     return self._json(svc.mt5_info())
                 if u.path == "/api/analysis":
@@ -82,6 +84,8 @@ def make_handler(svc: OfficeService):
                     return self._json(svc.mt5_select(body.get("names") or []))
                 if u.path == "/api/mt5/open":
                     return self._json(svc.mt5_open(body.get("what", "editor")))
+                if u.path == "/api/hours/filter":
+                    return self._json(svc.set_hour_filter(body))
                 if u.path == "/api/settings":
                     return self._json(svc.settings(body))
                 if u.path == "/api/news/reload":

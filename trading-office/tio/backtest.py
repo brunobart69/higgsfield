@@ -238,6 +238,12 @@ def improvement_cycle(datasets: dict[str, MarketData], memory: Memory, news: Opt
     candidates.append(("Ativar penalidade de confiança por lições recorrentes (30%)", cp))
     cp = params.copy(); cp.rsi_overbought, cp.rsi_oversold = 75.0, 25.0
     candidates.append(("RSI extremos 80/20 → 75/25", cp))
+    # (b) filtro de horário escolhido SÓ com dados in-sample (horas com acerto acima do equilíbrio e n >= 5)
+    be = 1 / (1 + params.payout)
+    good = [int(h[:2]) for h, v in base_in["by_hour"].items() if v["n"] >= 5 and (v["win_rate"] or 0) > be]
+    if 3 <= len(good) < 24:
+        cp = params.copy(); cp.allowed_hours = sorted(good)
+        candidates.insert(1, (f"Filtro de horário (horas UTC {', '.join(f'{h:02d}' for h in sorted(good))})", cp))
     candidates = candidates[:max_candidates]
 
     results = []

@@ -5,8 +5,9 @@ import copy
 import hashlib
 import json
 from dataclasses import dataclass, field, asdict
+from typing import Optional
 
-AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "RISK", "HEAD"]
+AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "RISK", "HEAD"]
 
 
 @dataclass
@@ -33,6 +34,8 @@ class ModelParams:
     min_bucket_samples: int = 30
     volatility_max_mult: float = 2.6
     volatility_min_mult: float = 0.35
+    # Filtro de horário (horas UTC permitidas para operações simuladas; None = sem filtro)
+    allowed_hours: Optional[list] = None
     # Notícias
     news_block_before_min: int = 30
     news_block_after_min: int = 45

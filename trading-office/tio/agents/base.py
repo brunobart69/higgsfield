@@ -19,6 +19,9 @@ def session_of(ts: int) -> str:
     return "ny_tarde"
 
 
+PERSONAS = {'NEWS': ('Helena', 'f'), 'PA': ('Rafael', 'm'), 'RET': ('Bianca', 'f'), 'REV': ('Otávio', 'm'), 'VOL': ('Marina', 'f'), 'VP': ('Caio', 'm'), 'SR': ('Lúcia', 'f'), 'FIB': ('Teodoro', 'm'), 'MTF': ('Sofia', 'f'), 'LIQ': ('Gustavo', 'm'), 'MT5I': ('Nina', 'f'), 'TL': ('Diego', 'm'), 'RISK': ('Vera', 'f'), 'HEAD': ('Augusto', 'm')}
+
+
 class Agent:
     code = "BASE"
     number = 0
@@ -148,5 +151,6 @@ class Agent:
                                   f"(força {mine.strength:.2f}) não foi invalidada.", "reply", challenger.agent)
 
     def card(self) -> dict:
+        person, gender = PERSONAS.get(self.code, (self.name, "m"))
         return {"code": self.code, "number": self.number, "name": self.name, "specialty": self.specialty,
-                "personality": self.personality, "methodology": self.methodology}
+                "personality": self.personality, "methodology": self.methodology, "person": person, "gender": gender}

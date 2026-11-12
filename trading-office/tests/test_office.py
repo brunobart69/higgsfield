@@ -58,7 +58,7 @@ def test_decision_is_valid(data):
     assert res["decision"] in DECISIONS
     assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
     assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
-    assert len(res["reports"]) == 11
+    assert len(res["reports"]) == 12
     assert res["transcript"][-1]["kind"] == "decision"
 
 
@@ -229,3 +229,31 @@ def test_mt5_user_indicators_flow(monkeypatch, tmp_path):
     assert info["roles"]["0"] == "seta de COMPRA" and info["roles"]["1"] == "linha de preço"
     assert any(e["kind"] == "user_line" for e in rep["evidence"])
     assert any("REDESENHA" in w for w in rep["warnings"])
+
+
+def test_hours_and_filter(tmp_path):
+    from pathlib import Path
+    from tio.service import OfficeService
+    OfficeService.PREFS_PATH = tmp_path / "prefs.json"
+    mem = Memory(":memory:")
+    svc = OfficeService(provider=SyntheticProvider(bars=1500, end=END), memory=mem)
+    for h, res in ((8, "WIN"), (8, "WIN"), (8, "LOSS"), (15, "LOSS")):
+        ts = END - END % 86400 + h * 3600
+        mem.x("INSERT INTO trades(mode,run_id,asset,tf,direction,entry_ts,entry_price,exit_price,result,status) "
+              "VALUES('live','live','EURUSD','M15',1,?,1.0,?,?,'closed')", (ts, 1.1 if res == "WIN" else 0.9, res))
+    g = svc.hours()["grid"]
+    assert g["M15"][8]["trades"]["wins"] == 2 and g["M15"][8]["trades"]["n"] == 3
+    assert g["TODAS"][15]["trades"]["n"] == 1
+    assert svc.set_hour_filter({"enabled": True, "hours": [8, 9]})["enabled"]
+    assert svc.params()[1].allowed_hours == [8, 9]
+    OfficeService.PREFS_PATH = None
+
+
+def test_trendline_detection():
+    from tio.indicators import Swing, trend_lines
+    from tio.models import Candle
+    # fundos ascendentes alinhados (3 toques) e preço acima da linha
+    cs = [Candle(i * 900, 1 + i * 0.001, 1.003 + i * 0.001, 0.999 + i * 0.001, 1.002 + i * 0.001) for i in range(60)]
+    sw = [Swing(i, i * 900, cs[i].low, "L") for i in (5, 20, 35, 50)]
+    lines = trend_lines(cs, sw, 0.002)
+    assert lines and lines[0].kind == "LTA" and lines[0].touches >= 3

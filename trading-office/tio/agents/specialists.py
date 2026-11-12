@@ -720,5 +720,58 @@ class UserIndicatorsAgent(Agent):
         return rep
 
 
+# =========================================================================== 14
+class TrendlineAgent(Agent):
+    code, number, name, group = "TL", 14, "Linhas de Tendência", "trendline"
+    specialty = "Traça LTA e LTB automaticamente e lê toques e rompimentos"
+    personality = "Desenhista rigorosa: só aceita linha com 3 toques e nenhum fechamento do outro lado."
+    methodology = ("Liga pivôs confirmados (fundos para LTA, topos para LTB) na temporalidade de operação e em H1. "
+                   "Exige 3 toques (tolerância 0,18 ATR) e nenhum fechamento além da linha. Toque com rejeição = "
+                   "continuação; fechamento além da linha nas 2 últimas velas = rompimento.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        rep = self.new_report(ctx)
+        rep.data["lines"] = []
+        tfs = list(dict.fromkeys([ctx.focus_tf, "H1"]))
+        seen = False
+        for tf in tfs:
+            cs = ctx.candles(tf)
+            atr = ctx.atr(tf)
+            if not cs or len(cs) < 80 or not atr:
+                continue
+            seen = True
+            n = len(cs)
+            w = 0.6 if tf == "H1" else 0.5
+            for ln in ind.trend_lines(cs, ctx.swings(tf), atr):
+                now_v = ln.value_at(n - 1)
+                prev_v = ln.value_at(n - 2)
+                last, prev = cs[-1], cs[-2]
+                rep.data["lines"].append({"tf": tf, "kind": ln.kind, "t1": cs[ln.i1].ts, "p1": ln.p1,
+                                          "t2": cs[-1].ts, "p2": now_v, "touches": ln.touches})
+                d = BULL if ln.kind == "LTA" else BEAR
+                label = "LTA (linha de alta)" if ln.kind == "LTA" else "LTB (linha de baixa)"
+                if d == BULL and last.close < now_v - 0.1 * atr and prev.close >= prev_v:
+                    self.ev(rep, "tl_break", f"Rompimento da {label} {tf} por fechamento em {_fmt(last.close)} "
+                                             f"({ln.touches} toques)", BEAR, w, 0.7, tf)
+                elif d == BEAR and last.close > now_v + 0.1 * atr and prev.close <= prev_v:
+                    self.ev(rep, "tl_break", f"Rompimento da {label} {tf} por fechamento em {_fmt(last.close)} "
+                                             f"({ln.touches} toques)", BULL, w, 0.7, tf)
+                else:
+                    touch = (last.low <= now_v + 0.25 * atr) if d == BULL else (last.high >= now_v - 0.25 * atr)
+                    held = (last.close >= now_v) if d == BULL else (last.close <= now_v)
+                    if touch and held:
+                        q = min(1.0, 0.45 + 0.1 * ln.touches) * (1.0 if ind.wick_rejection(last) == d else 0.8)
+                        self.ev(rep, "tl_touch", f"Preço tocou a {label} {tf} ({ln.touches} toques) e fechou respeitando",
+                                d, w, q, tf)
+                    else:
+                        dist = abs(last.close - now_v) / atr
+                        rep.warnings.append(f"{label} {tf} ativa em {_fmt(now_v)} ({dist:.1f} ATR do preço, {ln.touches} toques).")
+        if not seen:
+            rep.abstain = True
+        elif not rep.data["lines"]:
+            rep.summary = "Nenhuma linha de tendência válida (3 toques sem fechamento contrário) no momento."
+        return rep
+
+
 SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
-               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent]
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent]

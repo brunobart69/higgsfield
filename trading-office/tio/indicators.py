@@ -475,3 +475,65 @@ def wilson(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
     centre = (p + z * z / (2 * n)) / den
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / den
     return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+# --------------------------------------------------------------------------- #
+# Linhas de tendência (LTA / LTB)
+# --------------------------------------------------------------------------- #
+@dataclass
+class TrendLine:
+    kind: str            # "LTA" (liga fundos, suporte) ou "LTB" (liga topos, resistência)
+    i1: int
+    p1: float
+    i2: int
+    p2: float
+    touches: int
+    slope: float         # preço por candle
+
+    def value_at(self, i: int) -> float:
+        return self.p1 + self.slope * (i - self.i1)
+
+
+def trend_lines(candles: list[Candle], sw: list[Swing], atr_value: float, max_points: int = 10) -> list[TrendLine]:
+    """Linhas ligando pivôs confirmados, com ao menos 3 toques e sem fechamento além da linha.
+
+    Um rompimento nas 2 últimas velas fechadas é mantido (é o próprio evento de rompimento).
+    """
+    if not candles or not atr_value:
+        return []
+    n = len(candles)
+    tol = 0.18 * atr_value
+    out: list[TrendLine] = []
+    for kind, pts in (("LTA", [s for s in sw if s.kind == "L"][-max_points:]),
+                      ("LTB", [s for s in sw if s.kind == "H"][-max_points:])):
+        best = None
+        for a in range(len(pts)):
+            for b in range(a + 1, len(pts)):
+                s1, s2 = pts[a], pts[b]
+                if s2.idx - s1.idx < 5:
+                    continue
+                if kind == "LTA" and s2.price <= s1.price:
+                    continue
+                if kind == "LTB" and s2.price >= s1.price:
+                    continue
+                slope = (s2.price - s1.price) / (s2.idx - s1.idx)
+                line = TrendLine(kind, s1.idx, s1.price, s2.idx, s2.price, 0, slope)
+                touches = sum(1 for s in pts if s.idx >= s1.idx and abs(s.price - line.value_at(s.idx)) <= tol)
+                if touches < 3:
+                    continue
+                broken_early = False
+                for i in range(s1.idx, max(s1.idx, n - 2)):
+                    v = line.value_at(i)
+                    c = candles[i].close
+                    if (kind == "LTA" and c < v - tol) or (kind == "LTB" and c > v + tol):
+                        broken_early = True
+                        break
+                if broken_early:
+                    continue
+                line.touches = touches
+                score = touches * 10 + s2.idx / n
+                if best is None or score > best[0]:
+                    best = (score, line)
+        if best:
+            out.append(best[1])
+    return out

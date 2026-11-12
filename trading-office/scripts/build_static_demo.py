@@ -37,7 +37,7 @@ def main() -> None:
     snap = {
         "status": svc.status(), "agents": svc.agents_catalog(), "overview": {t: svc.overview(t) for t in TFS},
         "analysis": {t: {a: svc.analyze(a, t) for a in ASSETS} for t in TFS},
-        "scan": {t: svc.scan(t) for t in TFS}, "mt5": svc.mt5_info(), "history": svc.history(),
+        "scan": {t: svc.scan(t) for t in TFS}, "mt5": svc.mt5_info(), "hours": svc.hours(), "history": svc.history(),
         "news": {"loaded": svc.news.loaded, "events": [e.to_dict() for e in svc.news.events[-200:]]},
         "memory": svc.memory_view(), "backtest": bt,
         "chat": {a: svc.chat(f"Qual é a situação do {a[:3]}/{a[3:]}?") for a in ASSETS},
@@ -46,6 +46,7 @@ def main() -> None:
     web = ROOT / "tio" / "web"
     html = (web / "index.html").read_text()
     body = html[html.index("<body>") + 6: html.index('<script src="app.js">')]
+    os.environ.setdefault("TIO_DATA_DIR", tempfile.mkdtemp())
     css = (web / "style.css").read_text()
     css += """
 :root { color-scheme: dark; }
@@ -68,6 +69,7 @@ window.fetch = (url, opts) => {
   if (p.endsWith("/api/overview")) return _json(SNAP.overview[tf]);
   if (p.endsWith("/api/scan")) return _json(SNAP.scan[tf]);
   if (p.endsWith("/api/mt5")) return _json(SNAP.mt5);
+  if (p.endsWith("/api/hours")) return _json(SNAP.hours);
   if (p.endsWith("/api/analysis")) return _json(SNAP.analysis[tf][q.get("asset")] || SNAP.analysis[tf].EURUSD);
   if (p.endsWith("/api/history")) return _json(SNAP.history);
   if (p.endsWith("/api/news")) return _json(SNAP.news);
@@ -100,6 +102,7 @@ window.fetch = (url, opts) => {
 {body}
 <script>{shim}</script>
 <script>{(web / "app.js").read_text()}</script>
+<script>{(web / "office.js").read_text()}</script>
 """
     Path(args.out).write_text(page)
     print(f"{args.out}: {len(page) / 1024:.0f} KB", file=sys.stderr)
