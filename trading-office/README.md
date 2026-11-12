@@ -17,6 +17,29 @@ analisam individualmente, debatem, contestam uns aos outros e chegam a uma decis
 O programa **só lê** os candles do MT5 (nenhuma ordem é enviada). Os horários da corretora são convertidos para UTC e o
 volume usado é o tick volume. O ativo é localizado mesmo com sufixo da corretora (ex.: `EURUSDm`, `EURUSD.r`).
 
+### Escritório virtual
+
+A aba **Escritório** é a sede da equipe: diretoria (Head Trader), sala de reunião, gestão de risco, copa e a mesa de
+análise com as estações dos especialistas. Cada agente é uma pessoa (Helena · Notícias, Rafael · Price Action,
+Bianca · Retração, Otávio · Reversão, Marina · Volume/RSI, Caio · Volume Profile, Lúcia · S/R, Teodoro · Fibonacci,
+Sofia · Tendência, Gustavo · Liquidez, Nina · Indicadores MT5, Diego · LTA/LTB, Vera · Risco e Augusto · Head Trader).
+
+* As telas de cada computador ficam verdes, vermelhas ou cinzas conforme o viés atual do agente.
+* A cada vela fechada nova (com intervalo mínimo), o Head Trader convoca a equipe: todos andam até a sala e as falas
+  da reunião real aparecem em balões; depois cada um volta para a mesa.
+* Entre reuniões, as pessoas trabalham, tomam café e visitam colegas — quando discordam, vão até a mesa do outro
+  defender a própria leitura.
+* Clique em uma pessoa (ou na mesa dela) para conversar: visão atual, motivos, níveis, taxa de acerto, metodologia,
+  horários. As respostas vêm da análise real do agente, não são inventadas.
+
+### Linhas de tendência (Agente 14) e horários
+
+* **Diego · Linhas de Tendência** traça LTA/LTB ligando pivôs confirmados (mínimo de 3 toques e nenhum fechamento do
+  outro lado), em M1/M5/M15 e H1, e as desenha no gráfico do Painel.
+* A aba **Horários** registra o acerto por hora de entrada (UTC e horário local) e por temporalidade. Você pode ligar um
+  **filtro de horário**: o Risk Manager passa a aprovar simulações só nas horas escolhidas. O ciclo de aprendizado
+  também testa um filtro de horário e só o adota se melhorar fora da amostra.
+
 ### Multi-Pares, M1/M5 e treino automático
 
 * A aba **Multi-Pares** mostra os 8 pares ao mesmo tempo, com mini-gráfico, decisão, viés de cada agente e a operação
