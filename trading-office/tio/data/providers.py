@@ -251,6 +251,7 @@ class MT5Provider(Provider):
         self.broker = (info.server if info else None) or (term.company if term else "MetaTrader 5")
         self._symbols: dict[str, Optional[str]] = {}
         self._offset: Optional[int] = None
+        self.last_errors: dict = {}
         self.data_path = Path(term.data_path) if term and getattr(term, "data_path", None) else None
         self.common_path = Path(term.commondata_path) if term and getattr(term, "commondata_path", None) else None
         self.install_path = Path(term.path) if term and getattr(term, "path", None) else None
@@ -397,6 +398,77 @@ class MT5Provider(Provider):
             self._symbols[asset] = found
         return self._symbols[asset]
 
+    def _fetch_rates(self, sym: str, tf: str, want: int):
+        """Pede as velas de várias formas antes de desistir; devolve (rates, motivo do último erro)."""
+        import time as _t
+        err = "sem resposta"
+        try:
+            self.mt5.symbol_select(sym, True)
+        except Exception:
+            pass
+        attempts = [("pos", want), ("pos", min(want, 1000)), ("pos", 300), ("from", min(want, 1000))]
+        for i, (how, n) in enumerate(attempts):
+            try:
+                if how == "pos":
+                    rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, n)
+                else:
+                    ref = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(days=1)
+                    rates = self.mt5.copy_rates_from(sym, self.TF[tf], ref, n)
+            except Exception as e:
+                rates, err = None, repr(e)
+            if rates is not None and len(rates):
+                return rates, None
+            try:
+                le = self.mt5.last_error()
+                err = f"last_error={le}" if le else err
+            except Exception:
+                pass
+            if i == 0:
+                _t.sleep(1.5)   # primeiro pedido costuma disparar a sincronização do histórico no terminal
+        return None, err
+
+    def diagnose(self, asset: str) -> list[dict]:
+        """Testa cada passo da leitura e devolve a resposta exata do MT5 (para mostrar no painel)."""
+        steps = []
+
+        def add(name, ok, detail):
+            steps.append({"step": name, "ok": bool(ok), "detail": str(detail)[:400]})
+
+        try:
+            ti = self.mt5.terminal_info()
+            add("terminal", ti is not None, {k: getattr(ti, k, None) for k in ("connected", "trade_allowed", "maxbars", "build", "path")}
+                if ti else self.mt5.last_error())
+        except Exception as e:
+            add("terminal", False, repr(e))
+        try:
+            ai = self.mt5.account_info()
+            add("conta", ai is not None, getattr(ai, "server", None) if ai else self.mt5.last_error())
+        except Exception as e:
+            add("conta", False, repr(e))
+        sym = self.symbol(asset)
+        add("símbolo", sym is not None, sym or f"{asset} não encontrado na lista da corretora")
+        if not sym:
+            return steps
+        try:
+            si = self.mt5.symbol_info(sym)
+            add("symbol_info", si is not None, {k: getattr(si, k, None) for k in ("visible", "select", "digits", "trade_mode")} if si else self.mt5.last_error())
+            tk = self.mt5.symbol_info_tick(sym)
+            now = dt.datetime.now(dt.timezone.utc).timestamp()
+            add("último tick", tk is not None, f"horário do servidor {getattr(tk, 'time', None)} · diferença para UTC "
+                                               f"{round((getattr(tk, 'time', now) - now) / 3600, 2)} h" if tk else self.mt5.last_error())
+        except Exception as e:
+            add("symbol_info/tick", False, repr(e))
+        add("offset de horário", True, f"{self.server_offset(sym) // 3600:+d} h")
+        for tf in ("M1", "M5", "M15", "H1", "D1"):
+            rates, err = self._fetch_rates(sym, tf, 300)
+            if rates is None or not len(rates):
+                add(f"velas {tf}", False, err)
+                continue
+            last = int(rates[-1]["time"]) - self.server_offset(sym)
+            now = dt.datetime.now(dt.timezone.utc).timestamp()
+            add(f"velas {tf}", True, f"{len(rates)} velas; última abriu há {round((now - last) / 60, 1)} min (UTC)")
+        return steps
+
     def server_offset(self, sym: str) -> int:
         """Diferença (s) entre o horário do servidor da corretora e UTC, arredondada à meia hora."""
         if self._offset is None:
@@ -415,13 +487,14 @@ class MT5Provider(Provider):
         sym = self.symbol(asset)
         if sym is None or tf not in self.TF:
             return None
-        try:
-            rates = self.mt5.copy_rates_from_pos(sym, self.TF[tf], 0, count if _recent else min(count, self.COUNT.get(tf, count)))
-        except Exception as e:
-            print(f" · MT5: {asset} {tf} indisponível ({e})", flush=True)
-            return None
+        want = count if _recent else min(count, self.COUNT.get(tf, count))
+        rates, err = self._fetch_rates(sym, tf, want)
         if rates is None or len(rates) == 0:
+            msg = f"{asset} {tf}: o MT5 não entregou velas ({err})"
+            self.last_errors[(asset, tf)] = msg
+            print(f" · MT5: {msg}", flush=True)
             return None
+        self.last_errors.pop((asset, tf), None)
         off = self.server_offset(sym)
         candles = [Candle(int(r["time"]) - off, float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]),
                           float(r["tick_volume"])) for r in rates]

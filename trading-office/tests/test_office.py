@@ -523,3 +523,27 @@ def test_mt5_polling_is_light(monkeypatch, tmp_path):
     svc.data("EURUSD", "M1")
     assert calls[-1] == (1, 40)         # incremental: só as últimas 40 velas
     OfficeService.PREFS_PATH = None
+
+
+def test_mt5_empty_candles_show_real_reason(tmp_path):
+    import types
+    from tio.data.providers import MT5Provider
+    from tio.service import OfficeService
+    OfficeService.PREFS_PATH = tmp_path / "p.json"
+    tried = []
+    fake = types.SimpleNamespace(
+        TIMEFRAME_M1=1, TIMEFRAME_M5=5, TIMEFRAME_M15=15, TIMEFRAME_M30=30, TIMEFRAME_H1=60, TIMEFRAME_H4=240,
+        TIMEFRAME_D1=1440, TIMEFRAME_W1=10080, TIMEFRAME_MN1=43200, initialize=lambda: True,
+        last_error=lambda: (-2, "Terminal: Invalid params"), account_info=lambda: types.SimpleNamespace(server="InfinoxLimited-MT5Live"),
+        terminal_info=lambda: None, symbol_info=lambda s: types.SimpleNamespace(visible=True, select=True, digits=5, trade_mode=4),
+        symbols_get=lambda: [], symbol_select=lambda s, v: True, symbol_info_tick=lambda s: None,
+        copy_rates_from_pos=lambda s, tf, a, n: tried.append(("pos", n)),
+        copy_rates_from=lambda s, tf, d, n: tried.append(("from", n)))
+    p = MT5Provider(module=fake)
+    svc = OfficeService(provider=p, memory=Memory(":memory:"))
+    res = svc.analyze("AUDCAD", "M15")
+    assert "Invalid params" in res["error"] and "Diagnóstico" in res["error"]
+    assert ("pos", 300) in tried and any(t[0] == "from" for t in tried)      # tentou outras formas antes de desistir
+    steps = p.diagnose("AUDCAD")
+    assert any(s["step"] == "velas M15" and not s["ok"] and "Invalid params" in s["detail"] for s in steps)
+    OfficeService.PREFS_PATH = None

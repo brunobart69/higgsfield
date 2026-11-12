@@ -515,6 +515,13 @@ async function loadMT5() {
        <p class="muted small">Acerto = direção do sinal comparada com a direção real até a expiração simulada. Só é vantagem se a faixa IC95% inteira ficar acima do ponto de equilíbrio do payout.</p>`
     : `<p class="muted small">Ainda sem sinais avaliados. Com o exportador ligado e o treino automático rodando, cada seta dos seus indicadores é conferida depois da expiração.</p>`;
 }
+$("#mt5-diag").onclick = async () => {
+  $("#mt5-diag-out").textContent = "testando cada passo… (pode levar alguns segundos)";
+  const r = await api(`/api/mt5/diagnose?asset=${S.asset}`);
+  if (r.error) { $("#mt5-diag-out").textContent = r.error; return; }
+  $("#mt5-diag-out").innerHTML = `<p>Diagnóstico de <b>${esc(r.asset)}</b>:</p><table>${r.steps.map((s) => `<tr><td>${s.ok ? '<span class="up">✔</span>' : '<span class="down">✖</span>'}</td><td><b>${esc(s.step)}</b></td><td class="mono small">${esc(s.detail)}</td></tr>`).join("")}</table>
+    <p class="muted">Se as velas falharem, tire uma foto desta tabela e envie.</p>`;
+};
 $("#mt5-save").onclick = async () => {
   const names = $$("#mt5-list input:checked").map((i) => i.value);
   const r = await post("/api/mt5/indicators", { names });

@@ -151,7 +151,7 @@ class OfficeService:
             return hit[1]
         if hit and incremental:
             fetched, srs, full_at = hit
-            if srs is None and now - fetched < 120:
+            if srs is None and now - fetched < 30:
                 return None
             if srs is not None and len(srs):
                 if now < srs.candles[-1].close_ts + 1.5:      # a vela atual ainda não fechou: nada novo
@@ -330,7 +330,11 @@ class OfficeService:
         tf = tf or self.base_tf
         md = self._md_for(asset, tf)
         if md is None:
-            return {"error": f"Sem dados de {asset} em {tf} na fonte '{self.provider.name}'."}
+            why = (getattr(self.provider, "last_errors", {}) or {}).get((asset, "M1" if tf in ("M1", "M5") else tf)) \
+                or (getattr(self.provider, "last_errors", {}) or {}).get((asset, tf))
+            return {"error": f"Sem dados de {asset} em {tf} na fonte '{self.provider.name}'."
+                             + (f" Motivo informado pelo MT5: {why}." if why else "")
+                             + (" Use o botão 'Diagnóstico do MT5' na aba MT5." if self.provider.name == "mt5" else "")}
         version, params = self.params()
         rules = self.rules()
         params.payout = rules.payout
@@ -566,6 +570,15 @@ class OfficeService:
                 "roles": load_overrides(), "exporter": store.status(), "exporter_install": p.exporter_note,
                 "exporter_file": p.exporter_state(),
                 "symbols": {a: p.symbol(a) for a in self.assets}, "stats": per_ind}
+
+    def mt5_diagnose(self, asset: Optional[str] = None) -> dict:
+        if self.provider.name != "mt5":
+            return {"error": "Não conectado ao MetaTrader 5."}
+        asset = asset or (self.assets[0] if self.assets else "EURUSD")
+        steps = self.provider.diagnose(asset)
+        with self.lock:            # força nova leitura depois do diagnóstico
+            self._series = {k: v for k, v in self._series.items() if k[0] != asset}
+        return {"asset": asset, "steps": steps}
 
     def mt5_open(self, what: str) -> dict:
         if self.provider.name != "mt5":

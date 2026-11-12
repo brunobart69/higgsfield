@@ -103,6 +103,8 @@ def make_handler(svc_or_boot):
                     return self._json(svc.ranking())
                 if u.path == "/api/hours":
                     return self._json(svc.hours())
+                if u.path == "/api/mt5/diagnose":
+                    return self._json(svc.mt5_diagnose(q.get("asset")))
                 if u.path == "/api/mt5":
                     return self._json(svc.mt5_info())
                 if u.path == "/api/analysis":

@@ -44,6 +44,9 @@ def main(argv=None) -> int:
     f.add_argument("--assets", default=",".join(ASSETS))
     f.add_argument("--tfs", default="M15")
 
+    dg = sub.add_parser("diagnostico", help="testa a leitura de velas do MT5 passo a passo")
+    dg.add_argument("asset", nargs="?", default="EURUSD")
+
     n = sub.add_parser("news", help="calendário econômico")
     n.add_argument("--fetch", action="store_true", help="baixa a semana do calendário ForexFactory")
 
@@ -77,6 +80,13 @@ def main(argv=None) -> int:
             print("Nenhum evento carregado.")
         return 0
 
+    if args.cmd == "diagnostico":
+        from .data.providers import MT5Provider
+        p = MT5Provider()
+        print(f"\nDiagnóstico do MT5 para {args.asset.upper()}:\n")
+        for s in p.diagnose(args.asset.upper().replace("/", "")):
+            print(f"  {'OK ' if s['ok'] else 'ERRO'}  {s['step']:<18} {s['detail']}")
+        return 0
     tfs = [t.strip().upper() for t in args.tfs.split(",")] if args.tfs else None
     if args.cmd == "serve":
         from .server import serve
