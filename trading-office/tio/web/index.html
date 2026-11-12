@@ -17,6 +17,7 @@
     <button data-tab="painel">Painel</button>
     <button data-tab="sala">Sala de Operações</button>
     <button data-tab="lab">Laboratório</button>
+    <button data-tab="treino">Treinamento</button>
     <button data-tab="horas">Horários</button>
     <button data-tab="memoria">Memória &amp; Evolução</button>
     <button data-tab="mt5">MT5</button>
@@ -30,7 +31,7 @@
 <main id="escritorio" class="tab on">
   <div class="office-bar">
     <div id="office-status" class="small">carregando…</div>
-    <div class="office-actions"><button class="ghost" id="office-speed">Velocidade 1×</button><button class="primary" id="office-meet">Convocar reunião</button></div>
+    <div class="office-actions"><button class="ghost" id="office-loss">Reunião sobre a última perda</button><button class="ghost" id="office-speed">Velocidade 1×</button><button class="primary" id="office-meet">Convocar reunião</button></div>
   </div>
   <section class="office">
     <div class="office-floor"><canvas id="office-canvas" aria-label="Planta do escritório com os agentes"></canvas></div>
@@ -57,7 +58,7 @@
       <div class="ch"><h2>1 · Mercado atual</h2><select id="asset"></select></div>
       <div class="price-row"><div id="px" class="px">—</div><div id="decision" class="pill">—</div></div>
       <canvas id="chart" height="340"></canvas>
-      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg fib">Fibonacci</span><span class="lg tl">LTA / LTB</span></div>
+      <div class="legend"><span class="lg poc">POC</span><span class="lg va">Área de valor</span><span class="lg sr">S/R</span><span class="lg liq">Liquidez</span><span class="lg ouro">Taxa Ouro (mensal)</span><span class="lg prata">Taxa Prata (semanal)</span><span class="lg fib">Fibonacci</span><span class="lg tl">LTA / LTB</span></div>
     </div>
     <div class="card" id="c-decision">
       <div class="ch"><h2>11 · Decisão coletiva</h2></div>
@@ -126,6 +127,33 @@
     <div class="card"><div class="ch"><h2>Desempenho individual dos agentes</h2></div><div id="bt-agents-perf"></div></div>
     <div class="card"><div class="ch"><h2>Processo × resultado</h2></div><div id="bt-quad"></div></div>
     <div class="card"><div class="ch"><h2>Decisões e abstenções</h2></div><div id="bt-dec"></div></div>
+  </section>
+</main>
+
+<!-- ============================ TREINAMENTO ============================ -->
+<main id="treino" class="tab">
+  <section class="grid">
+    <div class="card">
+      <div class="ch"><h2>Regras da corretora</h2><span class="small up" id="broker-msg"></span></div>
+      <form id="broker-form" class="form"></form>
+    </div>
+    <div class="card">
+      <div class="ch"><h2>Ciclo de treinamento</h2></div>
+      <form id="train-form" class="form">
+        <label>Ativos<div id="train-assets" class="checks"></div></label>
+        <div class="row2"><label>Mesa<select name="timeframe"><option value="M1">M1 (expira no fechamento da vela M1)</option><option value="M5">M5 (contexto M5, gatilho M1)</option></select></label>
+        <label>Estudo / validação<select name="split"><option value="0.6">60% / 40%</option><option value="0.7">70% / 30%</option><option value="0.5">50% / 50%</option></select></label></div>
+        <div class="row2"><label>Passo (velas M1)<input name="step" type="number" value="2" min="1" max="10"></label>
+        <label>Mín. operações para aprovar<input name="min_trades" type="number" value="20" min="5"></label></div>
+        <label class="checks"><label><input type="checkbox" name="study_mode" value="1" checked>Modo estudo (amostra ampliada: confluência MÉDIA também vira ticket de estudo)</label></label>
+        <button class="primary">Executar os 10 ciclos</button>
+        <p class="small muted">Melhorias só são aprovadas se melhorarem nos dados de estudo, nos dados NÃO usados e passarem no teste estatístico (p &lt; 0,10).</p>
+      </form>
+    </div>
+    <div class="card"><div class="ch"><h2>Etapas</h2></div><ol class="stages" id="train-stages"></ol></div>
+    <div class="card span3"><div class="ch"><h2>Resultado do último ciclo</h2></div><div id="train-result" class="small muted">Nenhum ciclo executado ainda.</div></div>
+    <div class="card span3"><div class="ch"><h2>Trading Mistakes Database</h2><button class="ghost" id="mistakes-refresh">Atualizar</button></div><div id="mistakes"></div></div>
+    <div class="card span3"><div class="ch"><h2>Ranking dos agentes</h2></div><div id="ranking"></div></div>
   </section>
 </main>
 

@@ -157,7 +157,8 @@ class Office:
         tr.append(Message(H, narrative, "decision"))
 
         if decision.startswith("CENÁRIO") and tf_cmp["applies"] and not tf_cmp["ok"] and p.require_tf_agreement:
-            decision, reason = "AGUARDAR CONFIRMAÇÃO", "Conflito entre temporalidades: " + tf_cmp["text"]
+            decision, reason = "AGUARDAR CONFIRMAÇÃO", ("Conflito entre temporalidades: " if tf_cmp.get("conflict")
+                                                        else "Falta confirmação: ") + tf_cmp["text"]
         direction = c["direction"] if decision.startswith("CENÁRIO") else NEUTRAL
         mtfr = by_code.get("MTF")
         lab = ((mtfr.data.get("map") or {}).get(ctx.focus_tf) or {}).get("label") if mtfr else None

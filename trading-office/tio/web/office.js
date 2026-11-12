@@ -39,13 +39,13 @@
   furn("fridge", 1220, 60, 36, 56);
   furn("round", 1100, 140, 64, 64);
   // área de trabalho
-  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL"];
+  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM"];
   const deskPos = {};
   DESKS.forEach((code, i) => {
-    const row = Math.floor(i / 6), col = i % 6;
-    const x = 52 + col * 178, y = row === 0 ? 384 : 566;
-    furn("desk", x, y, 132, 44, { owner: code });
-    deskPos[code] = { x: x + 66, y: y + 72 };
+    const row = Math.floor(i / 7), col = i % 7;
+    const x = 34 + col * 156, y = row === 0 ? 384 : 566;
+    furn("desk", x, y, 124, 44, { owner: code });
+    deskPos[code] = { x: x + 62, y: y + 72 };
   });
   furn("board", 1140, 352, 112, 382);            // painel de cotações
   furn("plant", 20, 290, 28, 28); furn("plant", 20, 712, 28, 28); furn("plant", 1100, 712, 28, 28);
@@ -56,8 +56,8 @@
   // cadeiras da reunião: Head na cabeceira esquerda, Risk na direita, 6 em cima e 6 embaixo
   const meetSeat = { HEAD: { x: 360, y: 139 }, RISK: { x: 720, y: 139 } };
   DESKS.forEach((code, i) => {
-    const top = i < 6; const k = i % 6;
-    meetSeat[code] = { x: 412 + k * 51, y: top ? 80 : 198 };
+    const top = i < 7; const k = top ? i : i - 7;
+    meetSeat[code] = { x: top ? 404 + k * 45 : 418 + k * 49, y: top ? 80 : 198 };
   });
   const coffeeSpots = [{ x: 1060, y: 78 }, { x: 1110, y: 78 }, { x: 1160, y: 78 }, { x: 1085, y: 222 }, { x: 1180, y: 222 }, { x: 1112, y: 312 }];
 
@@ -126,6 +126,7 @@
     LIQ: { shirt: "#4c5562", skin: "#e0b088", hair: "#151515", style: "short" },
     MT5I: { shirt: "#1fa37a", skin: "#f1c6a2", hair: "#7a2f22", style: "bun" },
     TL: { shirt: "#d0603a", skin: "#7b4c31", hair: "#0c0907", style: "buzz" },
+    TIM: { shirt: "#e0b23c", skin: "#c99572", hair: "#3a2416", style: "long" },
     RISK: { shirt: "#7d2f3b", skin: "#e6b994", hair: "#4a4a4a", style: "bob" },
     HEAD: { shirt: "#1d2b3a", skin: "#d4a07a", hair: "#2d2d2d", style: "short", tie: true },
   };
@@ -169,12 +170,29 @@
         if (changed && !O.meeting && (force || !O.lastMeetingStart || O.t - O.lastMeetingStart > 75)) startMeeting();
       }
       O.scan = await api(`/api/scan?tf=${S.tf}`);
+      await checkLosses();
     } catch (e) { /* servidor indisponível: o escritório continua animado */ }
     updateTopbar();
   }
-  function startMeeting() {
-    if (!O.analysis) return;
-    const tr = (O.analysis.transcript || []).filter((m) => m.kind !== "system");
+  async function checkLosses() {
+    try {
+      const ms = await api(`/api/mistakes?mode=live&since=${O.lastMistake || 0}`);
+      if (O.lastMistake === undefined) { O.lastMistake = ms.length ? ms[0].id : 0; return; }   // não reprisa perdas antigas
+      if (ms.length && !O.meeting) { O.lastMistake = ms[0].id; startMeeting(ms[ms.length - 1]); }
+    } catch (e) { /* sem servidor */ }
+  }
+  function startMeeting(loss) {
+    if (!O.analysis && !loss) return;
+    const tr = loss ? loss.meeting.map((m) => ({ ...m, speaker: m.speaker })) : (O.analysis.transcript || []).filter((m) => m.kind !== "system");
+    if (loss) {
+      O.meeting = { phase: "gather", started: O.t, queue: tr.slice(), next: 0, loss: true };
+      O.lastMeetingStart = O.t;
+      say("HEAD", `Equipe, reunião pós-LOSS: ${loss.direction > 0 ? "CALL" : "PUT"} em ${loss.asset.slice(0, 3)}/${loss.asset.slice(3)} ${loss.tf}. Vamos descobrir por que perdemos.`, 4);
+      const involved = new Set(["HEAD", "RISK", ...loss.meeting.map((m) => codeByAgentName(m.speaker)).filter(Boolean)]);
+      Object.values(people).forEach((p) => { if (involved.has(p.code)) { const s = meetSeat[p.code]; goTo(p, s.x, s.y, "na reunião pós-LOSS"); } });
+      updateTopbar();
+      return;
+    }
     O.meeting = { phase: "gather", started: O.t, queue: tr.slice(), next: 0 };
     O.lastMeetingStart = O.t;
     say("HEAD", `Pessoal, reunião sobre ${O.analysis.asset.slice(0, 3)}/${O.analysis.asset.slice(3)} em ${O.analysis.timeframe}. Todos para a sala de reunião!`, 3);
@@ -184,7 +202,7 @@
     const m = O.meeting; if (!m) return;
     const all = Object.values(people);
     if (m.phase === "gather") {
-      const arrived = all.every((p) => !p.moving);
+      const arrived = all.filter((p) => (p.task || "").startsWith("na reunião")).every((p) => !p.moving);
       if (arrived || O.t - m.started > 14) { m.phase = "talk"; m.next = O.t + 0.5; }
       return;
     }
@@ -209,7 +227,7 @@
     }
     if (m.phase === "end" && O.t >= m.next) {
       O.meeting = null;
-      all.forEach((p) => { const s = deskPos[p.code]; goTo(p, s.x, s.y, "voltando para a mesa", () => { p.state = "work"; p.task = "trabalhando"; p.until = O.t + 6 + Math.random() * 14; }); });
+      all.filter((p) => (p.task || "").startsWith("na reunião") || !m.loss).forEach((p) => { const s = deskPos[p.code]; goTo(p, s.x, s.y, "voltando para a mesa", () => { p.state = "work"; p.task = "trabalhando"; p.until = O.t + 6 + Math.random() * 14; }); });
       O.nextMeetingAt = O.t + 180;
     }
   }
@@ -353,7 +371,7 @@
       }
     });
   }
-  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
+  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", TIM: "Timing M1", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
 
   function drawPerson(p) {
     const c = C(); const L = p.look;
@@ -438,6 +456,7 @@
   // ---------------------------------------------------------------- painel lateral e conversa
   function updateTopbar() {
     const an = O.analysis; const el = $("#office-status"); if (!el) return;
+    if (O.meeting && O.meeting.loss) { el.innerHTML = '<span class="down">Reunião pós-LOSS em andamento</span> — a equipe investiga a última perda (detalhes na aba Treinamento).'; return; }
     el.innerHTML = an ? `Analisando <b>${an.asset.slice(0, 3)}/${an.asset.slice(3)}</b> em <b>${an.timeframe}</b> · vela fechada ${esc(an.as_of_label)} · decisão <span class="pill ${decCls(an.decision)}">${esc(an.decision)}</span>${O.meeting ? ' · <span class="wait">reunião em andamento</span>' : ""}` : "carregando…";
   }
   function renderFeed() {
@@ -529,6 +548,12 @@
     O.canvas.addEventListener("click", (e) => { O.selected = pick(e); renderPanel(); });
     $("#office-form").onsubmit = (e) => { e.preventDefault(); const q = $("#office-input").value.trim(); if (!q) return; $("#office-input").value = ""; ask(q); };
     $("#office-meet").onclick = () => { if (!O.meeting) startMeeting(); };
+    $("#office-loss").onclick = async () => {
+      if (O.meeting) return;
+      const ms = await api("/api/mistakes");
+      if (ms.length) startMeeting(ms[0]);
+      else say("HEAD", "Ainda não temos nenhuma perda registrada para investigar.");
+    };
     $("#office-speed").onclick = () => { O.speed = O.speed === 1 ? 2 : O.speed === 2 ? 4 : 1; $("#office-speed").textContent = `Velocidade ${O.speed}×`; };
     O.ready = true;
   };

@@ -226,7 +226,9 @@ class HeadTrader(Agent):
             parts.append("M1 " + ("confirma" if m1 == direction else "contrário" if m1 == -direction else "neutro"))
             if m1 == -direction:
                 ok = False
-        return {"applies": True, "ok": ok, "text": "; ".join(parts) + (" → alinhadas." if ok else " → CONFLITO entre temporalidades."),
+        opposite = m5 == -direction or m1 == -direction
+        verdict = " → alinhadas." if ok else (" → CONFLITO entre temporalidades." if opposite else " → aguardando confirmação do M1.")
+        return {"applies": True, "ok": ok, "text": "; ".join(parts) + verdict, "conflict": opposite,
                 "m5": m5, "m1": m1}
 
     def conclude(self, ctx: MarketContext, reports: list[AgentReport], c: dict, risk: Optional[dict],

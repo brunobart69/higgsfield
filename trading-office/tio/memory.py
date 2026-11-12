@@ -303,7 +303,7 @@ class Memory:
         cols = ["created", "run_id", "mode", "asset", "tf", "direction", "signal_ts", "entry_ts", "expiry_ts", "entry_price",
                 "exit_price", "result", "hour", "condition", "categories", "cause", "evidence", "agents", "meeting",
                 "learning", "prevention", "analysis", "decision_id", "trade_id", "available_at"]
-        row = {**m, "created": now_iso(), "run_id": self.run_id, "mode": self.mode}
+        row = {**m, "created": now_iso(), "run_id": self.run_id, "mode": m.get("mode") or self.mode}
         for k in ("categories", "evidence", "agents", "meeting", "prevention", "analysis"):
             row[k] = json.dumps(row.get(k), ensure_ascii=False, default=str)
         return self.x(f"INSERT INTO trading_mistakes({','.join(cols)}) VALUES({','.join('?' * len(cols))})",

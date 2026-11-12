@@ -45,7 +45,8 @@ def _summ(m: dict) -> dict:
 
 
 def run_training(datasets: dict, memory: Memory, news=None, timeframe: str = "M1", split: float = 0.6, step: int = 2,
-                 min_trades: int = 20, max_candidates: int = 4, rules: Optional[dict] = None, progress=None) -> dict:
+                 min_trades: int = 20, max_candidates: int = 4, rules: Optional[dict] = None, progress=None,
+                 study_mode: bool = True) -> dict:
     stages = []
 
     def stage(i: int, text: str, data: Optional[dict] = None):
@@ -54,10 +55,19 @@ def run_training(datasets: dict, memory: Memory, news=None, timeframe: str = "M1
             progress(f"Ciclo {i}/10 · {STAGES[i - 1]}: {text}")
 
     version, params = memory.active_version()
+    prod_params = params
+    if study_mode:
+        # MODO ESTUDO (amostra ampliada): cenários de confluência MÉDIA também viram tickets de estudo.
+        # Base e candidatos são avaliados no MESMO regime; a regra aprovada é aplicada à versão de produção.
+        params = params.copy()
+        params.confluence_high = 30.0
+        params.confluence_medium = min(params.confluence_medium, 25.0)
+        params.min_independent_groups = max(2, params.min_independent_groups - 1)
     # ---------------------------------------------------------------- 1
     info = {a: {"bars_m1": len(d.tf.get("M1") or []), "from": fmt_ts(d.base[0].ts), "to": fmt_ts(d.base[-1].close_ts),
                 "source": d.source} for a, d in datasets.items()}
-    stage(1, f"{len(datasets)} ativo(s), temporalidade de operação {timeframe}; dados divididos em "
+    stage(1, ("Modo estudo (amostra ampliada: confluência MÉDIA também gera tickets de estudo). " if study_mode else "")
+             + f"{len(datasets)} ativo(s), temporalidade de operação {timeframe}; dados divididos em "
              f"{int(split * 100)}% para estudo e {100 - int(split * 100)}% guardados para validação.", info)
     base_kw = dict(assets=list(datasets), timeframe=timeframe, step=step, rules=rules)
     ins_cfg = backtest.BTConfig(**base_kw, start_frac=0.0, end_frac=split)
@@ -94,13 +104,16 @@ def run_training(datasets: dict, memory: Memory, news=None, timeframe: str = "M1
             continue
         seen.add(key)
         cp = params.copy()
+        prod = prod_params.copy()
         if "__expiry__" in changes:
+            prod.expiry_bars = 2 if timeframe in ("M1", "M5") else 1
             cp.expiry_bars = 2 if timeframe in ("M1", "M5") else 1
             text = f"{text} (teste: expiração de {cp.expiry_bars} velas)"
         else:
             for k, v in changes.items():
                 setattr(cp, k, v)
-        candidates.append({"category": cat, "rule": text, "params": changes, "p": cp})
+                setattr(prod, k, v)
+        candidates.append({"category": cat, "rule": text, "params": changes, "p": cp, "prod": prod})
         if len(candidates) >= max_candidates:
             break
     stage(7, f"{len(candidates)} regra(s) de prevenção propostas a partir das causas mais frequentes.",
@@ -133,7 +146,7 @@ def run_training(datasets: dict, memory: Memory, news=None, timeframe: str = "M1
                 if best is None or oos["expectancy"] > best[1]["out_sample"]["expectancy"]:
                     best = (c, entry)
         new_v = memory.next_version()
-        memory.add_version(new_v, version, c["p"], "rejected" if entry["status"] == "rejected" else "approved",
+        memory.add_version(new_v, version, c["prod"], "rejected" if entry["status"] == "rejected" else "approved",
                            f"[Treino {timeframe}] {c['rule']}", entry["reason"], entry["in_sample"],
                            entry.get("out_sample") or {}, _summ(base_in), _summ(base_out))
         entry["version"] = new_v
@@ -148,16 +161,17 @@ def run_training(datasets: dict, memory: Memory, news=None, timeframe: str = "M1
         memory.add_mistake({k: m[k] for k in ("asset", "tf", "direction", "signal_ts", "entry_ts", "expiry_ts", "entry_price",
                                               "exit_price", "result", "hour", "condition", "categories", "cause", "evidence",
                                               "agents", "meeting", "learning", "prevention", "analysis", "available_at")}
-                           | {"decision_id": None, "trade_id": None})
+                           | {"decision_id": None, "trade_id": None, "mode": "treinamento"})
         saved += 1
     if best:
         c, e = best
-        memory.add_version(e["version"] + "-active", version, c["p"], "active", f"[Treino {timeframe}] {c['rule']}",
+        memory.add_version(e["version"] + "-active", version, c["prod"], "active", f"[Treino {timeframe}] {c['rule']}",
                            "Promovida após validação fora da amostra e teste estatístico.", e["in_sample"], e["out_sample"],
                            _summ(base_in), _summ(base_out))
     stage(10, f"{saved} perdas gravadas no Trading Mistakes Database; "
               + (f"nova versão ativa {best[1]['version']}." if best else "metodologia mantida."), {})
     report = {"timeframe": timeframe, "stages": stages, "baseline_version": version, "promoted": best[1]["version"] if best else None,
-              "ranking": base_in.get("ranking"), "synthetic": base_in["synthetic"], "mistakes_by_category": dict(cats)}
+              "ranking": base_in.get("ranking"), "synthetic": base_in["synthetic"], "mistakes_by_category": dict(cats),
+              "study_mode": study_mode}
     memory.add_report("treinamento", f"Ciclo de treinamento {timeframe} sobre {version}", report)
     return report

@@ -170,3 +170,15 @@ footer { color: var(--muted); font-size: 11.5px; text-align: center; padding: 16
 .hours-pick label small { color: var(--muted); font-size: 9.5px; }
 .hours-pick input { margin: 0 0 2px; }
 .lg.tl::before { background: linear-gradient(90deg, var(--green) 50%, var(--red) 50%); }
+
+:root { --gold: #d9b44a; --silver: #c3c9d1; }
+.lg.ouro::before { background: var(--gold); } .lg.prata::before { background: var(--silver); }
+.stages { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; font-size: 12.5px; }
+.stages li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel2); }
+.stages li.ok { border-color: rgba(25,210,124,.45); } .stages li.ok b { color: var(--green); }
+.stages li.run { border-color: rgba(242,181,58,.55); }
+.mistake { padding: 8px 0; } .mistake summary { font-size: 12.5px; line-height: 1.8; }
+.post-meeting { display: grid; gap: 6px; margin: 8px 0; }
+tr.dim td { opacity: .5; }
+.taxa { display: inline-block; padding: 1px 7px; border-radius: 4px; font: 600 11px var(--mono); }
+.taxa.ouro { color: #1a1406; background: var(--gold); } .taxa.prata { color: #15181b; background: var(--silver); }

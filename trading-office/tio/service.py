@@ -466,7 +466,8 @@ class OfficeService:
         datasets = {a: d for a, d in datasets.items() if d}
         rep = run_training(datasets, self.memory, self.news, timeframe=tf, split=float(cfg.get("split", 0.6)),
                            step=int(cfg.get("step", 2)), min_trades=int(cfg.get("min_trades", 20)),
-                           rules=self.rules().to_dict(), progress=progress)
+                           rules=self.rules().to_dict(), progress=progress,
+                           study_mode=str(cfg.get("study_mode", "1")) not in ("0", "false", "False"))
         with self.lock:
             self._analysis.clear()
         return rep

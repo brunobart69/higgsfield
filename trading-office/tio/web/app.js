@@ -25,6 +25,7 @@ $$("#tabs button").forEach((b) => b.onclick = () => {
   if (b.dataset.tab === "multi") loadMulti();
   if (b.dataset.tab === "mt5") loadMT5();
   if (b.dataset.tab === "horas") loadHours();
+  if (b.dataset.tab === "treino") loadTraining();
   if (window.OFFICE) { if (b.dataset.tab === "escritorio") window.OFFICE.show(); else window.OFFICE.hide(); }
 });
 const activeTab = () => ($(".tab.on") || {}).id;
@@ -58,7 +59,12 @@ function drawChart(an) {
   (ch.fvg || []).forEach((z) => band(z.low, z.high, z.dir > 0 ? "rgba(25,210,124,.08)" : "rgba(255,77,94,.08)"));
   line(ch.poc, css("--amber"), [], "POC");
   Object.entries(ch.fib || {}).forEach(([cat, f]) => {
-    ["0.382", "0.500", "0.618"].forEach((k) => line(f.levels[k], "rgba(111,211,196,.55)", [2, 4], `${cat} ${k}`));
+    const col = cat === "OURO" ? css("--gold") : cat === "PRATA" ? css("--silver") : "rgba(111,211,196,.55)";
+    const name = cat === "OURO" ? "TAXA OURO" : cat === "PRATA" ? "TAXA PRATA" : cat;
+    const keys = cat === "OURO" || cat === "PRATA" ? ["0.236", "0.382", "0.500", "0.618", "0.786"] : ["0.382", "0.500", "0.618"];
+    if (cat === "OURO" || cat === "PRATA") c.lineWidth = 1.3;
+    keys.forEach((k) => line(f.levels[k], col, cat === "OURO" || cat === "PRATA" ? [6, 3] : [2, 4], `${name} ${k}`));
+    c.lineWidth = 1;
   });
   const tsx = (ts) => { // posição x de um instante (interpolação nos candles do gráfico)
     if (ts <= cs[0][0]) return bw / 2; if (ts >= cs[cs.length - 1][0]) return (cs.length - 1) * bw + bw / 2;
@@ -205,6 +211,8 @@ function drawAll() {
     ${an.process.items.map((i) => `<div class="crit"><span>${esc(i.name)}</span><span class="mono">${i.value.toFixed(2)}</span><div class="bar"><i style="width:${i.value * 100}%;background:var(--blue)"></i></div></div>`).join("")}
     ${an.divergences.length ? `<h3>Divergências</h3><ul class="list">${an.divergences.slice(0, 4).map((x) => `<li><span class="${dirCls(x.a_bias)}">${esc(x.a_name)}</span> × <span class="${dirCls(x.b_bias)}">${esc(x.b_name)}</span> <span class="muted">(${x.severity})</span></li>`).join("")}</ul>` : ""}
     ${an.risk ? `<h3>Risk Manager: ${an.risk.approved ? '<span class="up">APROVADO</span>' : '<span class="down">NÃO APROVADO</span>'}</h3><ul class="list">${an.risk.checks.map((k) => `<li class="${k.ok ? "" : "down"}">${k.ok ? "✔" : "✖"} ${esc(k.text)}</li>`).join("")}</ul>` : `<p class="muted small">Risk Manager não acionado (sem cenário de confluência alta).</p>`}
+    ${an.tf_compare && an.tf_compare.applies ? `<h3>Comparação M1 × M5</h3><p class="small ${an.tf_compare.ok ? "up" : "wait"}">${esc(an.tf_compare.text)}</p>` : ""}
+    ${an.ticket_plan ? `<h3>Ticket (regras da corretora)</h3><p class="small">Entrada ${tsLbl(an.ticket_plan.entry_ts)}:${String(an.ticket_plan.entry_ts % 60).padStart(2, "0")} · expira ${tsLbl(an.ticket_plan.expiry_ts)} · ${an.ticket_plan.remaining_s}s até a expiração${an.paper_trade ? ` · <b>${esc(an.paper_trade)}</b>` : ""}</p>` : ""}
     <p class="muted small">Fonte: ${esc(an.source)}</p>`;
   // confluência
   $("#confluence").innerHTML = `<div><span class="score ${dirCls(c.direction)}">${c.score}</span> <span class="muted">/100 · confluência ${c.classification} · viés ${dirLbl[c.direction]}</span></div>
@@ -228,8 +236,11 @@ function drawAll() {
   $("#rsi-info").innerHTML = `RSI(14) ${R.data.rsi ?? "—"} · volume: ${esc(R.data.volume_kind || "—")}${R.data.volume_ratio ? ` (${R.data.volume_ratio}× média)` : ""}<br>${esc(R.summary)}${(R.warnings || []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}`;
   // fibonacci
   const F = rep("FIB"); const cats = F.data.categories || {};
-  $("#fib").innerHTML = ["DIAMANTE", "OURO", "PRATA", "BRONZE"].map((k) => { const f = cats[k]; if (!f) return `<details><summary>${k} <span class="muted small">sem dados</span></summary></details>`;
-    return `<details><summary><b>${k}</b> <span class="muted small">${esc(f.ref)}</span></summary><table>${Object.entries(f.levels).map(([l, v]) => `<tr><td>${l}</td><td class="num">${fmtP(v)}</td></tr>`).join("")}</table></details>`; }).join("") +
+  const tx = F.data.taxa_alert;
+  const tname = (k) => k === "OURO" ? '<span class="taxa ouro">TAXA OURO · MENSAL</span>' : k === "PRATA" ? '<span class="taxa prata">TAXA PRATA · SEMANAL</span>' : `<b>${k}</b>`;
+  $("#fib").innerHTML = (tx ? `<div class="warn" style="margin-bottom:6px">Preço na ${esc(tx.label)} ${tx.level} (${fmtP(tx.price)}): ${esc(tx.scenario)}</div>` : "") +
+    ["OURO", "PRATA", "DIAMANTE", "BRONZE"].map((k) => { const f = cats[k]; if (!f) return `<details><summary>${tname(k)} <span class="muted small">sem dados</span></summary></details>`;
+    return `<details ${k === "OURO" || k === "PRATA" ? "open" : ""}><summary>${tname(k)} <span class="muted small">${esc(f.ref)}</span></summary><table>${Object.entries(f.levels).map(([l, v]) => `<tr><td>${l}</td><td class="num">${fmtP(v)}</td></tr>`).join("")}</table></details>`; }).join("") +
     `<p class="small">${esc(F.summary || "")}</p>${(F.data.targets || []).length ? `<div class="small muted">Alvos (expansões): ${F.data.targets.slice(0, 3).map((t) => `${t.cat} ${t.level} ${fmtP(t.price)}`).join(" · ")}</div>` : ""}`;
   // S/R
   const SR = rep("SR"); const zs = SR.data.zones || [];
@@ -446,6 +457,90 @@ $("#hours-suggest").onclick = () => {
 };
 $("#hours-save").onclick = async () => { const r = await post("/api/hours/filter", { enabled: true, hours: [...HRS.picked] }); $("#hours-status").textContent = r.enabled ? `Filtro ligado: ${r.hours.length} horas.` : "Marque pelo menos uma hora."; loadHours(); };
 $("#hours-off").onclick = async () => { await post("/api/hours/filter", { enabled: false, hours: [...HRS.picked] }); $("#hours-status").textContent = "Filtro desligado."; loadHours(); };
+
+// ------------------------------------------------------------------ treinamento
+const TR = { rules: null };
+async function loadTraining() {
+  const st = await api("/api/status"); TR.rules = st.broker_rules;
+  const r = TR.rules;
+  $("#broker-form").innerHTML = `
+    <div class="row2"><label>Preço de referência<select name="price_ref">${["bid", "ask", "mid"].map((x) => `<option ${r.price_ref === x ? "selected" : ""} value="${x}">${{ bid: "Bid (compra da corretora)", ask: "Ask", mid: "Médio (bid+ask)/2" }[x]}</option>`).join("")}</select></label>
+    <label>Atraso da entrada (s)<input name="entry_delay_s" type="number" min="0" max="240" value="${r.entry_delay_s}"></label></div>
+    <div class="row2"><label>Expiração<select name="expiry_mode"><option value="candle_close" ${r.expiry_mode === "candle_close" ? "selected" : ""}>No fechamento da própria vela</option><option value="bars" ${r.expiry_mode === "bars" ? "selected" : ""}>Após N velas</option></select></label>
+    <label>N velas (modo N velas)<input name="expiry_bars" type="number" min="1" max="30" value="${r.expiry_bars}"></label></div>
+    <div class="row2"><label>Payout<input name="payout" type="number" step="0.01" min="0.1" max="1" value="${r.payout}"></label>
+    <label>Empate<select name="tie_rule"><option value="refund" ${r.tie_rule === "refund" ? "selected" : ""}>Devolve o valor</option><option value="loss" ${r.tie_rule === "loss" ? "selected" : ""}>Conta como perda</option></select></label></div>
+    <div class="row2"><label>Tempo mínimo restante M1 (s)<input name="min_m1" type="number" value="${(r.min_remaining_s || {}).M1 ?? 30}"></label>
+    <label>Tempo mínimo restante M5 (s)<input name="min_m5" type="number" value="${(r.min_remaining_s || {}).M5 ?? 120}"></label></div>
+    <label>Diferença de relógio da corretora (ms)<input name="settlement_offset_ms" type="number" value="${r.settlement_offset_ms}"></label>
+    <button class="primary">Salvar regras da corretora</button>
+    <p class="small muted">${st.has_ticks ? "Preços de entrada e expiração vêm dos ticks da sua corretora (MT5)." : "Sem ticks (modo sem MT5): a entrada é feita em instantes com preço exato (início de minuto) e o atraso é ignorado; isso fica registrado em cada ticket."}</p>`;
+  $("#broker-form").onsubmit = async (e) => {
+    e.preventDefault(); const f = formData(e.target);
+    const body = { price_ref: f.price_ref, entry_delay_s: +f.entry_delay_s, expiry_mode: f.expiry_mode, expiry_bars: +f.expiry_bars,
+      payout: +f.payout, tie_rule: f.tie_rule, settlement_offset_ms: +f.settlement_offset_ms, min_remaining_s: { M1: +f.min_m1, M5: +f.min_m5, M15: 300 } };
+    await post("/api/broker", body); $("#broker-msg").textContent = "Regras salvas."; setTimeout(() => { $("#broker-msg").textContent = ""; }, 2500);
+  };
+  $("#train-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i < 2 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");
+  loadMistakes(); loadRanking();
+  const reps = (await api("/api/memory")).reports.filter((x) => x.kind === "treinamento");
+  if (reps.length && !TR.shown) renderTraining(reps[0].body);
+}
+const STAGE_NAMES = ["Analisar dados históricos", "Identificar oportunidades hipotéticas", "Registrar entradas e expirações simuladas", "Conferir os resultados", "Investigar os erros", "Debater os erros entre os agentes", "Propor melhorias", "Testar as melhorias em dados não utilizados", "Aprovar ou rejeitar as melhorias", "Atualizar a memória coletiva"];
+function renderStages(done, current) {
+  $("#train-stages").innerHTML = STAGE_NAMES.map((n, i) => {
+    const s = done.find((x) => x.n === i + 1);
+    const cls = s ? "ok" : current === i + 1 ? "run" : "";
+    return `<li class="${cls}"><b>Ciclo ${i + 1}</b> · ${esc(n)}${s ? `<div class="small muted">${esc(s.text)}</div>` : current === i + 1 ? '<div class="small wait">executando…</div>' : ""}</li>`;
+  }).join("");
+}
+function renderTraining(rep) {
+  TR.shown = true; renderStages(rep.stages, 0);
+  const s9 = rep.stages.find((x) => x.n === 9); const res = (s9 && s9.data.results) || [];
+  $("#train-result").innerHTML = `<p>${rep.promoted ? `<b class="up">Nova versão aprovada: ${esc(rep.promoted)}</b>` : "<b>Nenhuma melhoria aprovada</b> — a metodologia foi mantida."} ${rep.synthetic ? '<span class="down">(dados sintéticos)</span>' : ""}</p>
+    ${res.length ? `<table><tr><th>Causa</th><th>Regra testada</th><th>Status</th><th>Motivo</th></tr>${res.map((r) => `<tr><td class="small">${esc(r.category)}</td><td class="small">${esc(r.rule)}</td><td><span class="tag ${r.status}">${r.status === "approved" ? "aprovada" : "rejeitada"}</span></td><td class="small">${esc(r.reason)}</td></tr>`).join("")}</table>` : '<p class="small muted">Sem perdas suficientes para propor regras.</p>'}`;
+}
+$("#train-form").onsubmit = async (e) => {
+  e.preventDefault(); const btn = $("button", e.target); btn.disabled = true; TR.shown = false;
+  const f = formData(e.target); f.study_mode = f.study_mode ? "1" : "0"; renderStages([], 1);
+  const { job } = await post("/api/train", f);
+  for (;;) {
+    const j = await api(`/api/job?id=${job}`);
+    const last = j.progress[j.progress.length - 1] || ""; const m = last.match(/Ciclo (\d+)\/10/);
+    const done = j.progress.map((p) => { const mm = p.match(/Ciclo (\d+)\/10 · [^:]+: (.*)/); return mm ? { n: +mm[1], text: mm[2] } : null; }).filter(Boolean);
+    renderStages(done, m ? +m[1] + 1 : 1);
+    if (j.status !== "running") { btn.disabled = false; if (j.result) { renderTraining(j.result); loadMistakes(); loadRanking(); } else $("#train-result").textContent = j.error || "erro"; break; }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+};
+async function loadMistakes() {
+  const ms = await api("/api/mistakes");
+  $("#mistakes").innerHTML = ms.length ? ms.slice(0, 60).map((m) => `<details class="mistake"><summary>
+      <span class="mono small">${tsLbl(m.entry_ts)}</span> <b>${m.asset}</b> ${m.tf} <b class="${m.direction > 0 ? "up" : "down"}">${m.direction > 0 ? "CALL" : "PUT"}</b>
+      ${fmtP(m.entry_price)} → ${fmtP(m.exit_price)} · <span class="down">LOSS</span> · ${(m.categories || []).map((c) => `<span class="tag">${esc(c)}</span>`).join(" ")} <span class="muted small">${esc(m.mode)}</span></summary>
+      <p class="small"><b>Causa provável:</b> ${esc(m.cause)} · condição: ${esc(m.condition || "—")} · hora ${String(m.hour).padStart(2, "0")}h UTC · confluência ${m.analysis?.confluence ?? "—"}</p>
+      <p class="small"><b>Análise original:</b> ${esc(m.analysis?.decision || "")} — ${esc(m.analysis?.reason || "")}</p>
+      <p class="small"><b>Evidências:</b></p><ul class="list">${(m.evidence?.findings || []).map((f) => `<li class="small"><b>${esc(f.category)}:</b> ${esc(f.evidence)}</li>`).join("") || "<li class='small muted'>nenhuma falha identificável</li>"}</ul>
+      <p class="small muted">Tendências na entrada: ${Object.entries(m.evidence?.trends || {}).map(([k, v]) => `${k} ${v}`).join(" · ")} · a favor durante a operação: ${m.evidence?.mfe_atr ?? "—"} ATR · depois da expiração: ${m.evidence?.post_atr ?? "—"} ATR · preço de entrada: ${esc(m.evidence?.entry_source || "")}</p>
+      <p class="small"><b>Agentes:</b> erraram: ${esc((m.agents?.wrong || []).join(", ") || "—")} · ignorados: ${esc((m.agents?.ignored || []).join(", ") || "—")}</p>
+      <div class="post-meeting">${(m.meeting || []).map((x) => `<div class="msg ${x.kind}"><b>${esc(x.speaker)}</b>${esc(x.text)}</div>`).join("")}</div>
+      <p class="small"><b>Aprendizado:</b> ${esc(m.learning)}</p>
+      <p class="small"><b>Regra de prevenção proposta:</b> ${(m.prevention || []).map((r) => esc(r.text)).join(" · ") || "—"} <span class="muted">(só é adotada após validação fora da amostra)</span></p>
+    </details>`).join("") : `<p class="muted small">Nenhuma perda registrada ainda. Toda operação simulada que terminar em LOSS (ao vivo ou no treinamento) será investigada e aparecerá aqui.</p>`;
+}
+async function loadRanking() {
+  const r = await api("/api/ranking");
+  const names = Object.fromEntries((S.agents || []).map((a) => [a.code, `${a.person} · ${a.name}`]));
+  const rows = (list) => list.map((x) => `<tr class="${x.enough ? "" : "dim"}"><td class="num">${x.rank}</td><td>${esc(names[x.agent] || x.agent)}</td><td class="num">${x.n}</td><td class="num">${x.errors}</td>
+      <td class="num">${pct(x.hit_rate)}</td><td class="num muted">${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}</td><td class="num ${x.brier_skill > 0 ? "up" : "down"}">${x.brier_skill}</td>
+      <td class="num">${x.by_tf.M1 ? pct(x.by_tf.M1.hit_rate) + ` <span class="muted">(${x.by_tf.M1.n})</span>` : "—"}</td><td class="num">${x.by_tf.M5 ? pct(x.by_tf.M5.hit_rate) + ` <span class="muted">(${x.by_tf.M5.n})</span>` : "—"}</td>
+      <td class="small">${Object.entries(x.by_condition).map(([k, v]) => `${esc(k)} ${pct(v.hit_rate, 0)}`).join(" · ")}</td></tr>`).join("");
+  const head = `<tr><th class="num">#</th><th>Agente</th><th class="num">análises</th><th class="num">erros</th><th class="num">acerto</th><th class="num">IC95%</th><th class="num">qualidade da confiança</th><th class="num">M1</th><th class="num">M5</th><th>por condição de mercado</th></tr>`;
+  const src = r.live && r.live.length ? r.live : r.training || [];
+  $("#ranking").innerHTML = src.length ? `<p class="small muted">${r.live && r.live.length ? "Simulações ao vivo" : `Último treinamento (${esc(r.training_at || "")})`}. Ordem por qualidade: limite inferior do IC95% + qualidade da confiança (Brier), não por número de vitórias. Linhas apagadas: menos de 30 avaliações.</p><div class="table-wrap"><table>${head}${rows(src)}</table></div>` : `<p class="muted small">Sem avaliações ainda.</p>`;
+}
+
+$("#mistakes-refresh").onclick = () => { loadMistakes(); loadRanking(); };
 
 // ------------------------------------------------------------------ boot
 $("#refresh").onclick = () => { loadOverview(); loadAnalysis(); loadHistory(); };

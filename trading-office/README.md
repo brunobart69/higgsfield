@@ -17,6 +17,39 @@ analisam individualmente, debatem, contestam uns aos outros e chegam a uma decis
 O programa **só lê** os candles do MT5 (nenhuma ordem é enviada). Os horários da corretora são convertidos para UTC e o
 volume usado é o tick volume. O ativo é localizado mesmo com sufixo da corretora (ex.: `EURUSDm`, `EURUSD.r`).
 
+### Treinamento de opções binárias M1/M5 (aba Treinamento)
+
+**Ticket simulado** = preço de entrada, direção (CALL/PUT), horário de entrada, temporalidade de referência, horário de
+expiração, preço de fechamento e resultado. A expiração padrão é o **fechamento da própria vela**:
+
+* M1: sinal no fechamento de 10:29 → entrada 10:30:15 → expira 10:31:00;
+* M5: contexto M5 + gatilho M1; entrada 10:32:00 → expira 10:35:00 (só entra se restar o tempo mínimo configurado).
+
+O preço de entrada é o da corretora **no instante da entrada** (ticks do MT5, bid/ask/médio). Sem ticks, a entrada vai
+para um instante com preço exato (início de minuto) — a abertura da vela nunca é usada para uma entrada feita depois
+dela. Regras da corretora (preço de referência, atraso, modo de expiração, empate, payout, diferença de relógio) são
+configuráveis na aba Treinamento.
+
+* **Agente 15 · Lívia (Timing M1)**: pressão compradora/vendedora, corpos e pavios, velocidade, rompimentos e falsos
+  rompimentos, varreduras curtas, retrações curtas, exaustão e **espaço até a expiração**. Vela verde ou vermelha
+  nunca é confirmação sozinha (exige 2 fatos independentes).
+* **Comparação M1 × M5 obrigatória**: M5 dá o contexto, M1 a confirmação; conflito ⇒ AGUARDAR CONFIRMAÇÃO.
+* **TAXA OURO (mensal, dourada)** e **TAXA PRATA (semanal, prateada)**: níveis da última vela mensal/semanal fechada,
+  gravados na memória no primeiro uso e nunca alterados retroativamente. Perto de uma Taxa, o Head Trader aciona os
+  especialistas e classifica a região (continuação, reversão, rejeição, rompimento confirmado ou ausência de
+  confirmação). Fibonacci isolado nunca autoriza entrada.
+* **LOSS ANALYZER**: toda perda é investigada (gráfico no instante da entrada, tendências M1/M5/H1/H4, liquidez e
+  varreduras, S/R, Fibonacci, RSI/volume, notícias, atraso, entrada contra a tendência, sinais ignorados, comportamento
+  entre a entrada e a expiração e logo depois), classificada em 16 categorias (pode ter mais de uma), discutida numa
+  **reunião pós-LOSS** (também encenada no escritório) e gravada no **Trading Mistakes Database** com a regra de
+  prevenção proposta. O Head Trader consulta esse banco antes de cada decisão.
+* **Ranking dos agentes**: acerto, nº de análises e de erros, qualidade da confiança (Brier), M1, M5, ativo e condição
+  de mercado — ordenado pelo limite inferior do IC95%, não por número de vitórias.
+* **Ciclo de treinamento (10 etapas)**: dados históricos → oportunidades → tickets → resultados → investigação → debate →
+  propostas → teste em dados não usados → aprovação/rejeição com teste estatístico (bootstrap, p < 0,10) → memória.
+  O **modo estudo** amplia a amostra (confluência MÉDIA também vira ticket de estudo) e compara base e candidatos no
+  mesmo regime; regras aprovadas passam a valer na produção.
+
 ### Escritório virtual
 
 A aba **Escritório** é a sede da equipe: diretoria (Head Trader), sala de reunião, gestão de risco, copa e a mesa de
