@@ -46,5 +46,12 @@ echo  O painel abre sozinho no navegador assim que estiver pronto.
 echo  Baixando o calendario economico da semana...
 %PY% -m tio news --fetch >nul 2>nul
 echo  Treino automatico: 8 pares em M1, M5 e M15 (operacoes apenas simuladas).
-%PY% -m tio --provider mt5 --tf M5 --tfs M1,M5,M15 serve --auto --open
-pause
+set OPEN=--open
+:inicio
+%PY% -X faulthandler -m tio --provider mt5 --tf M5 --tfs M1,M5,M15 serve --auto %OPEN%
+echo.
+echo  [!] O escritorio parou. Se repetir, tire uma foto desta janela (o erro aparece acima) e envie.
+echo      Reiniciando em 10 segundos... (feche esta janela para encerrar)
+set OPEN=
+timeout /t 10 >nul
+goto inicio

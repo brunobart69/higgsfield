@@ -192,6 +192,25 @@ class YahooProvider(Provider):
         return Series(asset, tf, candles, "Yahoo Finance (query1.finance.yahoo.com)", volume_kind="none")
 
 
+class _SerializedModule:
+    """Encaminha as chamadas ao pacote MetaTrader5 uma de cada vez (evita queda do processo por concorrência)."""
+
+    _lock = __import__("threading").RLock()
+
+    def __init__(self, mod):
+        self._mod = mod
+
+    def __getattr__(self, name):
+        attr = getattr(self._mod, name)
+        if not callable(attr):
+            return attr
+
+        def call(*a, **k):
+            with _SerializedModule._lock:
+                return attr(*a, **k)
+        return call
+
+
 class MT5Provider(Provider):
     """Lê candles do terminal MetaTrader 5 aberto no mesmo computador (Windows).
 
@@ -207,7 +226,7 @@ class MT5Provider(Provider):
             import MetaTrader5 as mt5  # type: ignore
         except ImportError as e:
             raise RuntimeError("Pacote MetaTrader5 não instalado (pip install MetaTrader5; só funciona no Windows).") from e
-        self.mt5 = mt5
+        self.mt5 = _SerializedModule(mt5)   # a biblioteca do MT5 não é segura para chamadas simultâneas
         if not mt5.initialize():
             raise RuntimeError(f"Não consegui conectar ao MetaTrader 5 aberto: {mt5.last_error()}")
         self.TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
