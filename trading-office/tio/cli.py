@@ -19,6 +19,7 @@ def main(argv=None) -> int:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--auto", action="store_true", help="treino automático: analisa todos os pares continuamente")
+    s.add_argument("--open", action="store_true", help="abre o navegador assim que o site estiver no ar")
 
     a = sub.add_parser("analyze", help="reunião do escritório sobre um ativo")
     a.add_argument("asset")
@@ -77,11 +78,12 @@ def main(argv=None) -> int:
         return 0
 
     tfs = [t.strip().upper() for t in args.tfs.split(",")] if args.tfs else None
-    svc = OfficeService(provider=get_provider(args.provider), base_tf=args.tf.upper(), tfs=tfs)
     if args.cmd == "serve":
         from .server import serve
-        serve(args.host, args.port, svc, autopilot=args.auto)
+        serve(args.host, args.port, None, autopilot=args.auto, open_browser=args.open,
+              factory=lambda: OfficeService(provider=get_provider(args.provider), base_tf=args.tf.upper(), tfs=tfs))
         return 0
+    svc = OfficeService(provider=get_provider(args.provider), base_tf=args.tf.upper(), tfs=tfs)
     if args.cmd == "analyze":
         res = svc.analyze(args.asset.upper().replace("/", ""))
         if "error" in res:
