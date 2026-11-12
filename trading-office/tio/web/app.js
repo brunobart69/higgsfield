@@ -26,6 +26,7 @@ $$("#tabs button").forEach((b) => b.onclick = () => {
   if (b.dataset.tab === "mt5") loadMT5();
   if (b.dataset.tab === "horas") loadHours();
   if (b.dataset.tab === "treino") loadTraining();
+  if (b.dataset.tab === "pesquisa") loadResearch();
   if (window.OFFICE) { if (b.dataset.tab === "escritorio") window.OFFICE.show(); else window.OFFICE.hide(); }
 });
 const activeTab = () => ($(".tab.on") || {}).id;
@@ -541,6 +542,57 @@ async function loadRanking() {
 }
 
 $("#mistakes-refresh").onclick = () => { loadMistakes(); loadRanking(); };
+
+// ------------------------------------------------------------------ pesquisa (Agente 16)
+const credTag = (c) => !c ? "" : `<span class="tag ${c.label === "suspeito" ? "rejected" : c.label === "confiável para estudo" ? "approved" : ""}">${esc(c.label)}</span>`;
+const stTag = (s) => `<span class="tag ${s === "aprovado" ? "approved" : s === "rejeitado" ? "rejected" : ""}">${esc(s)}</span>`;
+const st2 = (x) => x ? `${x.n} sinais · ${pct(x.rate)}${x.p_value != null ? ` · p ${x.p_value}` : ""}` : "—";
+async function loadResearch() {
+  const v = await api("/api/research");
+  $("#res-key").innerHTML = v.youtube_key
+    ? `<p class="small"><span class="ok-dot on"></span>Chave do YouTube configurada: o Henrique busca vídeos-aula sozinho.</p>`
+    : `<p class="small"><span class="ok-dot"></span>Sem chave do YouTube: o Henrique pesquisa Wikipédia e estudos acadêmicos, e monta links de busca de vídeos para você abrir.</p>
+       <details><summary class="small">Como conseguir a chave gratuita (5 minutos)</summary><ol class="steps small">
+       <li>Entre em <span class="mono">console.cloud.google.com</span> com sua conta Google e crie um projeto.</li>
+       <li>Em "APIs e serviços" → "Biblioteca", ative <b>YouTube Data API v3</b>.</li>
+       <li>Em "Credenciais" → "Criar credenciais" → "Chave de API". Copie e cole abaixo.</li></ol></details>`;
+  $("#res-items").innerHTML = v.items.length ? v.items.map((it) => `<div class="res-item">
+      <a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
+      <div class="small muted">${esc(it.source)} · ${esc(it.kind)} · ${esc(it.channel || "")} ${it.published ? "· " + esc(String(it.published).slice(0, 10)) : ""}</div>
+      <div class="small">${credTag(it.credibility)} ${(it.credibility?.flags || []).map((f) => `<span class="warn">⚠ ${esc(f)}</span>`).join(" ")}
+        ${(it.mentions || []).length ? `<span class="muted">· cita: ${it.mentions.map((m) => esc(m.key)).join(", ")}</span>` : ""}</div>
+    </div>`).join("") : `<p class="muted small">Biblioteca vazia. Clique em "Pesquisar e testar agora" (precisa de internet no computador onde o programa roda).</p>`;
+  $("#res-lab").innerHTML = v.indicators.length ? `<div class="table-wrap"><table><tr><th>Indicador</th><th>Mesa</th><th>Status</th><th>Estudo</th><th>Validação (dados guardados)</th><th>Motivo</th><th>Origem</th></tr>
+    ${v.indicators.map((r) => `<tr><td class="small" title="${esc(r.rule || "")}">${esc(r.label)}</td><td>${r.tf}</td><td>${stTag(r.status)}</td><td class="small mono">${st2(r.in)}</td><td class="small mono">${st2(r.out)}</td><td class="small">${esc(r.reason)}</td><td class="small muted">${esc(r.origin)}</td></tr>`).join("")}</table></div>
+    <p class="small muted">Ponto de equilíbrio do payout: ${pct(v.indicators[0].breakeven)}. Só indicadores <b>aprovados</b> entram nas reuniões, pelo Henrique, com peso baixo.</p>`
+    : `<p class="muted small">Nenhum indicador testado ainda.</p>`;
+  $("#res-curr").innerHTML = v.curriculum.map((c) => `<details><summary><b>${esc(c.topic)}</b> <span class="tag">${esc(c.level)}</span></summary><p class="small">${esc(c.text)}</p><a class="small" href="${esc(c.link)}" target="_blank" rel="noopener">Buscar aulas sobre isso no YouTube ↗</a></details>`).join("");
+  $("#res-cat").innerHTML = `<div class="table-wrap"><table><tr><th>Indicador</th><th>Regra testada</th><th></th></tr>${v.catalog.map((c) => `<tr><td class="small">${esc(c.name)}</td><td class="small">${esc(c.rule)}</td><td><a class="small" href="${esc(c.link)}" target="_blank" rel="noopener">aulas ↗</a></td></tr>`).join("")}</table></div>`;
+}
+$("#res-key-form").onsubmit = async (e) => { e.preventDefault(); await post("/api/research/key", { key: $("#res-key-input").value }); $("#res-key-input").value = ""; loadResearch(); };
+$("#res-run").onclick = async () => {
+  const btn = $("#res-run"); btn.disabled = true; $("#res-log").textContent = "pesquisando…";
+  const { job } = await post("/api/research/run", { max_queries: 6, max_tests: 12 });
+  for (;;) {
+    const j = await api(`/api/job?id=${job}`);
+    $("#res-log").innerHTML = j.progress.slice(-6).map((p) => `<div>${esc(p)}</div>`).join("") || "pesquisando…";
+    if (j.status !== "running") {
+      btn.disabled = false;
+      if (j.result) $("#res-log").innerHTML = `<div><b>${j.result.found}</b> materiais (${j.result.new_items} novos) · <b>${j.result.tested}</b> testes · aprovados: ${j.result.approved.length ? esc(j.result.approved.join(", ")) : "nenhum"}</div>` + j.result.log.map((l) => `<div class="muted">${esc(l)}</div>`).join("");
+      else $("#res-log").textContent = j.error || "erro";
+      loadResearch(); break;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+};
+$("#res-text-form").onsubmit = async (e) => {
+  e.preventDefault(); const t = $("#res-text").value.trim(); if (!t) return;
+  $("#res-text-out").textContent = "testando…";
+  const r = await post("/api/research/text", { text: t });
+  $("#res-text-out").innerHTML = `<p class="small">Credibilidade do texto: ${credTag(r.credibility)} ${(r.credibility.flags || []).map((f) => `<span class="warn">⚠ ${esc(f)}</span>`).join(" ")}</p>` +
+    (r.note ? `<p class="small wait">${esc(r.note)}</p>` : `<table><tr><th>Ideia</th><th>Mesa</th><th>Status</th><th>Validação</th><th>Motivo</th></tr>${r.results.map((x) => `<tr><td class="small">${esc(x.label)}</td><td>${x.tf}</td><td>${stTag(x.status)}</td><td class="small mono">${st2(x.out_sample)}</td><td class="small">${esc(x.reason)}</td></tr>`).join("")}</table>`);
+  loadResearch();
+};
 
 // ------------------------------------------------------------------ boot
 $("#refresh").onclick = () => { loadOverview(); loadAnalysis(); loadHistory(); };

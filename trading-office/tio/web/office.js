@@ -39,7 +39,7 @@
   furn("fridge", 1220, 60, 36, 56);
   furn("round", 1100, 140, 64, 64);
   // área de trabalho
-  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM"];
+  const DESKS = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RES"];
   const deskPos = {};
   DESKS.forEach((code, i) => {
     const row = Math.floor(i / 7), col = i % 7;
@@ -57,7 +57,7 @@
   const meetSeat = { HEAD: { x: 360, y: 139 }, RISK: { x: 720, y: 139 } };
   DESKS.forEach((code, i) => {
     const top = i < 7; const k = top ? i : i - 7;
-    meetSeat[code] = { x: top ? 404 + k * 45 : 418 + k * 49, y: top ? 80 : 198 };
+    meetSeat[code] = { x: 404 + k * 45, y: top ? 80 : 198 };
   });
   const coffeeSpots = [{ x: 1060, y: 78 }, { x: 1110, y: 78 }, { x: 1160, y: 78 }, { x: 1085, y: 222 }, { x: 1180, y: 222 }, { x: 1112, y: 312 }];
 
@@ -127,6 +127,7 @@
     MT5I: { shirt: "#1fa37a", skin: "#f1c6a2", hair: "#7a2f22", style: "bun" },
     TL: { shirt: "#d0603a", skin: "#7b4c31", hair: "#0c0907", style: "buzz" },
     TIM: { shirt: "#e0b23c", skin: "#c99572", hair: "#3a2416", style: "long" },
+    RES: { shirt: "#5b7f3a", skin: "#e9c19b", hair: "#6b4a2b", style: "short" },
     RISK: { shirt: "#7d2f3b", skin: "#e6b994", hair: "#4a4a4a", style: "bob" },
     HEAD: { shirt: "#1d2b3a", skin: "#d4a07a", hair: "#2d2d2d", style: "short", tie: true },
   };
@@ -371,7 +372,7 @@
       }
     });
   }
-  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", TIM: "Timing M1", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
+  const shortRole = (card) => ({ NEWS: "Notícias", PA: "Price Action", RET: "Retração", REV: "Reversão", VOL: "Volume/RSI", VP: "Vol. Profile", SR: "S/R", FIB: "Fibonacci", MTF: "Tendência", LIQ: "Liquidez", MT5I: "Indic. MT5", TL: "LTA/LTB", TIM: "Timing M1", RES: "Pesquisa", RISK: "Risco", HEAD: "Head Trader" }[card.code] || card.name);
 
   function drawPerson(p) {
     const c = C(); const L = p.look;
@@ -514,6 +515,13 @@
       if (!an) return "Ainda estou esperando os dados.";
       if (/POR\s*QU|PORQUE|EXPLIC|MOTIVO/.test(Q)) return an.narrative;
       return `Para ${pair}: ${an.decision}. ${an.reason} Confluência ${an.confluence.classification} (${an.confluence.score}/100), ${an.confluence.agreeing_groups} fatores independentes.`;
+    }
+    if (code === "RES") {
+      const v = await api("/api/research");
+      const ap = v.indicators.filter((r) => r.status === "aprovado");
+      const susp = v.items.filter((i) => i.credibility && i.credibility.label === "suspeito").length;
+      if (/V[ÍI]DEO|AULA|ESTUD|APREND/.test(Q)) return `Minha biblioteca tem ${v.items.length} materiais (${susp} marcados como suspeitos por prometer lucro ou vender sinais). Na aba Pesquisa há uma trilha de aprendizado com ${v.curriculum.length} temas e links de aulas.`;
+      return `Testei ${v.indicators.length} ideias no laboratório. Aprovadas: ${ap.length ? ap.map((r) => `${r.label} (${r.tf})`).join(", ") : "nenhuma até agora — nenhuma mostrou vantagem estatística sobre o ponto de equilíbrio do payout"}. Se você viu uma estratégia num vídeo, cole na aba Pesquisa que eu testo.`;
     }
     if (code === "RISK") {
       if (!an || !an.risk) return `Para ${pair} não há cenário de confluência alta, então nada chegou à minha mesa. Não operar também é decisão.`;

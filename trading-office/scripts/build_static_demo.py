@@ -34,12 +34,15 @@ def main() -> None:
     bt = svc.run_backtest({"assets": ["EURUSD"], "strategy": "comite", "expiry_bars": 4, "step": 4})
     print("aprendizado…", file=sys.stderr)
     svc.learn({"assets": ["EURUSD", "USDJPY", "EURJPY"], "step": 8, "min_trades": 30, "max_candidates": 3})
+    print("pesquisa…", file=sys.stderr)
+    svc.research_from_text("No M1 ele usa Bandas de Bollinger 20 2, RSI 7 e Supertrend; diz que acerta 90% e usa gale.")
+    svc.run_research({"max_queries": 0, "max_tests": 6, "assets": ["EURUSD", "USDJPY"]})
     print("treinamento…", file=sys.stderr)
     train = svc.train({"assets": ["EURUSD", "USDJPY"], "timeframe": "M1", "step": 3, "min_trades": 10, "study_mode": "1"})
     snap = {
         "status": svc.status(), "agents": svc.agents_catalog(), "overview": {t: svc.overview(t) for t in TFS},
         "analysis": {t: {a: svc.analyze(a, t) for a in ASSETS} for t in TFS},
-        "scan": {t: svc.scan(t) for t in TFS}, "mt5": svc.mt5_info(), "hours": svc.hours(), "mistakes": svc.mistakes(), "ranking": svc.ranking(), "train": train, "history": svc.history(),
+        "scan": {t: svc.scan(t) for t in TFS}, "mt5": svc.mt5_info(), "hours": svc.hours(), "mistakes": svc.mistakes(), "research": svc.research_view(), "ranking": svc.ranking(), "train": train, "history": svc.history(),
         "news": {"loaded": svc.news.loaded, "events": [e.to_dict() for e in svc.news.events[-200:]]},
         "memory": svc.memory_view(), "backtest": bt,
         "chat": {a: svc.chat(f"Qual é a situação do {a[:3]}/{a[3:]}?") for a in ASSETS},
@@ -74,6 +77,11 @@ window.fetch = (url, opts) => {
   if (p.endsWith("/api/hours")) return _json(SNAP.hours);
   if (p.endsWith("/api/mistakes")) return _json(q.get("mode") === "live" ? [] : SNAP.mistakes);
   if (p.endsWith("/api/ranking")) return _json(SNAP.ranking);
+  if (p.endsWith("/api/research")) return _json(SNAP.research);
+  if (p.endsWith("/api/research/key")) return _json({ youtube: false });
+  if (p.endsWith("/api/research/run")) return _json({ job: "res" });
+  if (p.endsWith("/api/research/text")) return _json({ credibility: { label: "—", flags: [] }, mentions: [], results: [],
+      note: "Na demonstração o laboratório não roda. No programa instalado, o Henrique testa a ideia nos seus dados." });
   if (p.endsWith("/api/train")) return _json({ job: "train" });
   if (p.endsWith("/api/broker")) return _json(SNAP.status.broker_rules);
   if (p.endsWith("/api/analysis")) return _json(SNAP.analysis[tf][q.get("asset")] || SNAP.analysis[tf].EURUSD);
@@ -84,6 +92,8 @@ window.fetch = (url, opts) => {
   if (p.endsWith("/api/learn")) return _json({ job: "learn" });
   if (p.endsWith("/api/job")) return _json(q.get("id") === "bt"
       ? { status: "done", progress: [], result: SNAP.backtest }
+      : q.get("id") === "res" ? { status: "done", progress: [], result: { found: 0, new_items: 0, tested: 0, approved: [],
+          log: ["Demonstração: a pesquisa online só funciona no programa instalado, com internet."] } }
       : q.get("id") === "train" ? { status: "done", progress: SNAP.train.stages.map((s) => `Ciclo ${s.n}/10 · ${s.name}: ${s.text}`), result: SNAP.train }
       : { status: "done", progress: [], result: {} });
   if (p.endsWith("/api/chat")) {

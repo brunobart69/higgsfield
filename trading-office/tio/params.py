@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RISK", "HEAD"]
+AGENT_CODES = ["NEWS", "PA", "RET", "REV", "VOL", "VP", "SR", "FIB", "MTF", "LIQ", "MT5I", "TL", "TIM", "RES", "RISK", "HEAD"]
 
 
 @dataclass

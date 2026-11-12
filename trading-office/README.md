@@ -50,6 +50,22 @@ configuráveis na aba Treinamento.
   O **modo estudo** amplia a amostra (confluência MÉDIA também vira ticket de estudo) e compara base e candidatos no
   mesmo regime; regras aprovadas passam a valer na produção.
 
+### Agente 16 · Henrique, Pesquisador (aba Pesquisa)
+
+* Pesquisa **vídeos-aula** (YouTube Data API — chave gratuita, configurável na aba), artigos da **Wikipédia** sobre
+  indicadores e estudos do **arXiv**. Sem chave do YouTube, monta links de busca de aulas para você abrir.
+* Dá uma nota de **credibilidade** a cada material: promessas de 90–100% de acerto, "sem loss", lucro diário, venda de
+  robô/sinais, links de afiliado de corretora e martingale são sinalizados como suspeitos.
+* Extrai indicadores e parâmetros citados (ex.: "Bollinger 20 2", "RSI 7", "EMA 9 e 21") e testa cada um no
+  **laboratório**: 16 indicadores (Bollinger, Estocástico, MACD, cruzamento de médias, CCI, Williams %R, RSI, Supertrend,
+  Donchian, Keltner, Heikin Ashi, Parabolic SAR, Awesome, Momentum, Ichimoku, ADX/DMI), em M1 e M5, com o mesmo ticket da
+  mesa (sinal na vela fechada, entrada na abertura da seguinte, expiração no fechamento dela).
+* Só é **aprovado** o indicador que fica acima do ponto de equilíbrio do payout nos dados de estudo **e** nos dados
+  guardados, com amostra mínima e teste binomial (p < 0,10). Aprovados entram nas reuniões pelo Henrique, com peso baixo.
+* "Viu uma estratégia num vídeo? Cole aqui": o texto é avaliado e cada ideia citada é testada na hora.
+* Trilha de aprendizado com 8 temas (payout e ponto de equilíbrio, price action M1, contexto M5, liquidez, Taxas Ouro e
+  Prata, gestão de risco e martingale, backtest e sobreajuste, como reconhecer conteúdo enganoso).
+
 ### Escritório virtual
 
 A aba **Escritório** é a sede da equipe: diretoria (Head Trader), sala de reunião, gestão de risco, copa e a mesa de

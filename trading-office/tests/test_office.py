@@ -58,7 +58,7 @@ def test_decision_is_valid(data):
     assert res["decision"] in DECISIONS
     assert res["synthetic"] is True and "SINTÉTICO" in res["source"]
     assert "NÃO é probabilidade" in res["confluence"]["disclaimer"]
-    assert len(res["reports"]) == 13
+    assert len(res["reports"]) == 14
     assert res["transcript"][-1]["kind"] == "decision"
 
 
@@ -312,3 +312,36 @@ def test_loss_analyzer_and_training(tmp_path):
     assert m["ranking"] and "brier_skill" in m["ranking"][0]
     rep = run_training({"EURUSD": d}, mem, timeframe="M1", step=6, min_trades=5)
     assert [s["n"] for s in rep["stages"]] == list(range(1, 11))
+
+
+def test_research_lab_approves_only_real_edge_and_agent_uses_it(monkeypatch):
+    import json as _j
+    from tio.models import Candle
+    from tio.research import lab, sources
+    # série com tendência persistente: rompimentos de Donchian têm vantagem real; mercado aleatório não
+    cs, p = [], 1.0
+    for i in range(3000):
+        up = (i % 7) != 0
+        o = p
+        p = p + (0.0004 if up else -0.0002)
+        cs.append(Candle(i * 60, o, max(o, p) + 0.00005, min(o, p) - 0.00005, p, 1, (i + 1) * 60))
+    r = lab.evaluate("donchian", {}, {"X": cs})
+    assert r["status"] == "aprovado"
+    rnd = SyntheticProvider(bars=4000, end=END).load("EURUSD", "M1").candles
+    assert lab.evaluate("donchian", {}, {"EURUSD": rnd})["status"] != "aprovado"
+    # o Agente 16 só usa indicadores aprovados
+    mem = Memory(":memory:")
+    r["tf"] = "M15"
+    mem.save_research_indicator(r, "M15", "teste")
+    d = MarketData.load(SyntheticProvider(bars=1500, end=END), "EURUSD", "M15")
+    res = Office().meet(d.context(None, None, mem, ModelParams()))
+    rep = next(x for x in res["reports"] if x["agent"] == "RES")
+    assert not rep["abstain"] and rep["data"]["approved"]
+    # busca no YouTube (resposta simulada) + credibilidade + extração de parâmetros
+    fake = {"items": [{"id": {"videoId": "abc"}, "snippet": {"title": "RSI 7 no M1 — 100% sem loss", "channelTitle": "Canal",
+                                                             "publishedAt": "2026-01-01", "description": "link na bio"}}]}
+    monkeypatch.setattr(sources, "_get", lambda url, timeout=15: _j.dumps(fake).encode())
+    it = sources.youtube_search("x", "KEY")[0]
+    assert it["url"].endswith("abc")
+    assert sources.credibility(it["title"] + it["summary"])["label"] == "suspeito"
+    assert sources.extract_mentions(it["title"])[0] == {"key": "rsi", "params": {"n": 7}}

@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS trading_mistakes (
   hour INTEGER, condition TEXT, categories TEXT, cause TEXT, evidence TEXT, agents TEXT, meeting TEXT,
   learning TEXT, prevention TEXT, analysis TEXT, decision_id INTEGER, trade_id INTEGER, available_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS research_items (
+  id INTEGER PRIMARY KEY, created TEXT, source TEXT, kind TEXT, title TEXT, channel TEXT, published TEXT, url TEXT UNIQUE,
+  summary TEXT, query TEXT, credibility TEXT, mentions TEXT
+);
+CREATE TABLE IF NOT EXISTS research_indicators (
+  id INTEGER PRIMARY KEY, created TEXT, key TEXT, params TEXT, label TEXT, tf TEXT, status TEXT, reason TEXT,
+  result TEXT, origin TEXT, UNIQUE(key, params, tf)
+);
 CREATE INDEX IF NOT EXISTS ix_mistakes ON trading_mistakes(asset, tf, direction, available_at);
 CREATE INDEX IF NOT EXISTS ix_lessons ON lessons(agent, asset, tag, available_at);
 CREATE INDEX IF NOT EXISTS ix_outcomes ON agent_outcomes(agent, available_at);
@@ -334,6 +342,47 @@ class Memory:
             if condition and r["condition"] == condition:
                 same_cond += 1
         return {"n": len(rows), "categories": cats, "same_condition": same_cond}
+
+    # ------------------------------------------------------------ pesquisa (Agente 16)
+    def add_research_item(self, it: dict) -> bool:
+        try:
+            self.x("INSERT INTO research_items(created,source,kind,title,channel,published,url,summary,query,credibility,mentions)"
+                   " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (now_iso(), it["source"], it["kind"], it["title"], it.get("channel"), it.get("published"), it["url"],
+                    it.get("summary", "")[:2000], it.get("query"), json.dumps(it.get("credibility"), ensure_ascii=False),
+                    json.dumps(it.get("mentions"), ensure_ascii=False)))
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def research_items(self, limit: int = 200) -> list[dict]:
+        out = []
+        for r in self.q("SELECT * FROM research_items ORDER BY id DESC LIMIT ?", (limit,)):
+            d = dict(r)
+            d["credibility"] = json.loads(d["credibility"]) if d["credibility"] else None
+            d["mentions"] = json.loads(d["mentions"]) if d["mentions"] else []
+            out.append(d)
+        return out
+
+    def save_research_indicator(self, res: dict, tf: str, origin: str) -> None:
+        params = json.dumps(res["params"], sort_keys=True)
+        self.x("INSERT INTO research_indicators(created,key,params,label,tf,status,reason,result,origin) VALUES(?,?,?,?,?,?,?,?,?)"
+               " ON CONFLICT(key,params,tf) DO UPDATE SET created=excluded.created, status=excluded.status,"
+               " reason=excluded.reason, result=excluded.result, origin=excluded.origin",
+               (now_iso(), res["key"], params, res["label"], tf, res["status"], res["reason"],
+                json.dumps(res, ensure_ascii=False, default=str), origin))
+
+    def research_indicators(self, status: Optional[str] = None) -> list[dict]:
+        sql, args = "SELECT * FROM research_indicators", ()
+        if status:
+            sql, args = sql + " WHERE status=?", (status,)
+        out = []
+        for r in self.q(sql + " ORDER BY id DESC", args):
+            d = dict(r)
+            d["params"] = json.loads(d["params"])
+            d["result"] = json.loads(d["result"]) if d["result"] else None
+            out.append(d)
+        return out
 
     # ------------------------------------------------------------ relatórios
     def add_report(self, kind: str, title: str, body: dict) -> None:

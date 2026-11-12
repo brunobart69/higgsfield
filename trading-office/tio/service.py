@@ -447,6 +447,122 @@ class OfficeService:
                 self.memory.x("UPDATE trades SET status='closed', entry_price=?, exit_price=?, review=? WHERE id=?",
                               (out["entry_price"], out["exit_price"], json.dumps(rv, ensure_ascii=False), t["id"]))
 
+    # ------------------------------------------------------------------ pesquisa (Agente 16)
+    def _yt_key(self) -> Optional[str]:
+        import os
+        return os.environ.get("YOUTUBE_API_KEY") or (self.prefs.get("research") or {}).get("youtube_key")
+
+    def set_research_key(self, key: str) -> dict:
+        self.prefs.setdefault("research", {})["youtube_key"] = key.strip() or None
+        self._save_prefs()
+        return {"youtube": bool(self._yt_key())}
+
+    def _research_candles(self, tf: str, assets: list[str]) -> dict:
+        out = {}
+        for a in assets:
+            md = self.data(a, "M1")
+            if md is None:
+                continue
+            cs = md.tf.get(tf)
+            if cs:
+                out[a] = [c for c in cs if c.close_ts <= md.base[-1].close_ts]
+        return out
+
+    def _test_ideas(self, ideas: list[tuple], tfs: list[str], assets: list[str], origin: str, progress=None) -> list[dict]:
+        from .research.lab import evaluate
+        payout = self.rules().payout
+        results = []
+        for tf in tfs:
+            cs = self._research_candles(tf, assets)
+            if not cs:
+                continue
+            for key, params in ideas:
+                r = evaluate(key, params, cs, payout=payout)
+                r["tf"] = tf
+                self.memory.save_research_indicator(r, tf, origin)
+                results.append(r)
+                if progress:
+                    progress(f"Laboratório {tf}: {r['label']} → {r['status']} ({r['reason']})")
+        with self.lock:
+            self._analysis.clear()
+        return results
+
+    def run_research(self, cfg: dict, progress=None) -> dict:
+        """Pesquisa online + extração de ideias + teste no laboratório."""
+        from .research import sources as src
+        from .research.lab import research_plan
+        log, found = [], []
+        key = self._yt_key()
+        queries = list(src.QUERIES[: int(cfg.get("max_queries", 6))]) + ([cfg["query"]] if cfg.get("query") else [])
+        if key:
+            for q in queries:
+                try:
+                    found += src.youtube_search(q, key, 6)
+                    log.append(f"YouTube: '{q}' ok")
+                except Exception as e:
+                    log.append(f"YouTube: '{q}' falhou ({e})")
+        else:
+            log.append("YouTube: sem chave da API — usei links de busca para você abrir no navegador (aba Pesquisa).")
+        wiki = 0
+        for k, (term, lang) in src.WIKI_TERMS.items():
+            it = src.wikipedia_summary(term, lang)
+            if it:
+                found.append(it)
+                wiki += 1
+        log.append(f"Wikipédia: {wiki} artigo(s) sobre indicadores" + ("" if wiki else " (sem conexão?)"))
+        try:
+            found += src.arxiv_search("technical analysis indicators intraday forex", 5)
+            log.append("arXiv ok")
+        except Exception as e:
+            log.append(f"arXiv falhou ({e})")
+        if progress:
+            progress(f"{len(found)} materiais encontrados")
+        new = 0
+        mentions = []
+        for it in found:
+            text = f"{it['title']} {it.get('summary', '')}"
+            it["credibility"] = src.credibility(text)
+            it["mentions"] = src.extract_mentions(text)
+            if it["credibility"]["label"] != "suspeito":
+                mentions += it["mentions"]
+            new += self.memory.add_research_item(it)
+        tested = {(r["key"], __import__("json").dumps(r["params"], sort_keys=True)) for r in self.memory.research_indicators()
+                  if r["tf"] in ("M1", "M5")}
+        if cfg.get("retest"):
+            tested = set()
+        plan = research_plan(mentions, tested, int(cfg.get("max_tests", 12)))
+        assets = [a for a in (cfg.get("assets") or ASSETS[:4]) if a in ASSETS]
+        results = self._test_ideas(plan, ["M1", "M5"], assets, "pesquisa", progress)
+        rep = {"found": len(found), "new_items": new, "log": log, "tested": len(results),
+               "approved": [r["label"] + " " + r["tf"] for r in results if r["status"] == "aprovado"],
+               "synthetic": bool(self.data(ASSETS[0]) and self.data(ASSETS[0]).synthetic)}
+        self.memory.add_report("pesquisa", "Ciclo de pesquisa do Agente 16", rep)
+        return rep
+
+    def research_from_text(self, text: str, assets: Optional[list] = None) -> dict:
+        """O usuário cola a estratégia de um vídeo; o pesquisador extrai e testa."""
+        from .research import sources as src
+        cred = src.credibility(text)
+        ments = src.extract_mentions(text)
+        ideas = [(m["key"], m["params"]) for m in ments]
+        res = self._test_ideas(ideas, ["M1", "M5"], [a for a in (assets or ASSETS[:4]) if a in ASSETS], "texto do usuário") if ideas else []
+        return {"credibility": cred, "mentions": ments, "results": [{k: r[k] for k in ("label", "tf", "status", "reason", "in_sample", "out_sample", "breakeven", "rule")} for r in res],
+                "note": None if ideas else "Não encontrei indicadores conhecidos no texto. Cite nomes e parâmetros (ex.: 'Bollinger 20 2', 'RSI 7', 'EMA 9 e 21')."}
+
+    def research_view(self) -> dict:
+        from .research import CURRICULUM
+        from .research.indicators_lab import CATALOG
+        from .research.sources import youtube_search_link
+        inds = self.memory.research_indicators()
+        return {"youtube_key": bool(self._yt_key()),
+                "items": self.memory.research_items(150),
+                "indicators": [{k: r[k] for k in ("key", "label", "tf", "status", "reason", "origin", "created")} |
+                               {"in": (r["result"] or {}).get("in_sample"), "out": (r["result"] or {}).get("out_sample"),
+                                "breakeven": (r["result"] or {}).get("breakeven"), "rule": (r["result"] or {}).get("rule")} for r in inds],
+                "curriculum": [c | {"link": youtube_search_link(c["query"])} for c in CURRICULUM],
+                "catalog": [{"key": k, "name": v["name"], "rule": v["rule"], "params": v["params"],
+                             "link": youtube_search_link(v["name"] + " estratégia M1 explicação")} for k, v in CATALOG.items()]}
+
     # ------------------------------------------------------------------ treinamento, erros e ranking
     def mistakes(self, mode: Optional[str] = None, since_id: int = 0, limit: int = 100) -> list[dict]:
         return self.memory.mistakes(limit, mode=mode, since_id=since_id)

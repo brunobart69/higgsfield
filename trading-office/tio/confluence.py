@@ -27,8 +27,9 @@ CRITERIA = [
     ("profile", "POC / Volume Profile", 8),
     ("macro", "Contexto econômico favorável", 8),
     ("mt5", "Indicadores do usuário (MT5)", 8),
+    ("research", "Indicadores pesquisados (aprovados no laboratório)", 8),
 ]
-TOTAL_POINTS = sum(c[2] for c in CRITERIA if c[0] not in ("mt5", "timing"))  # opcional: não penaliza quem não usa
+TOTAL_POINTS = sum(c[2] for c in CRITERIA if c[0] not in ("mt5", "timing", "research"))  # opcional: não penaliza quem não usa
 
 
 def group_strength(reports: list[AgentReport], weights: dict) -> dict[str, dict[int, tuple[float, str, str]]]:
@@ -61,7 +62,7 @@ def score(reports: list[AgentReport], weights: dict, evaluated_groups: set[str],
     pts_for = pts_against = 0.0
     agreeing = 0
     for grp, label, pts in CRITERIA:
-        if grp in ("mt5", "timing") and grp not in evaluated_groups:
+        if grp in ("mt5", "timing", "research") and grp not in evaluated_groups:
             continue  # critério opcional: só aparece para quem exporta indicadores do MT5
         g = gs.get(grp, {})
         f = g.get(direction, (0.0, "", ""))[0] if direction else 0.0
@@ -88,7 +89,7 @@ def score(reports: list[AgentReport], weights: dict, evaluated_groups: set[str],
         cls = "BAIXA"
     return {"direction": direction, "score": round(total, 1), "classification": cls, "agreeing_groups": agreeing,
             "conflict_ratio": round(conflict, 2), "criteria": rows,
-            "not_evaluated": [GROUPS[g] for g in GROUPS if g not in evaluated_groups and g not in ("mt5", "timing")],
+            "not_evaluated": [GROUPS[g] for g in GROUPS if g not in evaluated_groups and g not in ("mt5", "timing", "research")],
             "disclaimer": "Pontuação de confluência — NÃO é probabilidade de acerto."}
 
 

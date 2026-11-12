@@ -133,6 +133,7 @@ GROUPS = {
     "mt5": "Indicadores do usuário (MT5)",
     "trendline": "Linhas de tendência",
     "timing": "Timing / micro-estrutura M1",
+    "research": "Indicadores pesquisados e aprovados",
 }
 
 

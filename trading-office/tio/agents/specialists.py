@@ -939,5 +939,45 @@ class TimingAgent(Agent):
         return rep
 
 
+# =========================================================================== 16
+class ResearchAgent(Agent):
+    code, number, name, group = "RES", 16, "Pesquisador de Estratégias", "research"
+    specialty = "Pesquisa vídeos-aula, artigos e estudos; transforma ideias em indicadores testados"
+    personality = "Curioso e cético: toda ideia vinda de vídeo é hipótese até passar no laboratório."
+    methodology = ("Busca materiais (YouTube, Wikipédia, arXiv), avalia credibilidade (promessas de lucro, afiliados e "
+                   "martingale são sinalizados), extrai indicadores e parâmetros citados e testa cada um nos dados "
+                   "históricos (estudo × validação, teste binomial). Nas reuniões só usa indicadores APROVADOS.")
+
+    def analyze(self, ctx: MarketContext) -> AgentReport:
+        from ..research.indicators_lab import CATALOG, describe, last_signal
+        rep = self.new_report(ctx)
+        mem = ctx.memory
+        approved = [r for r in (mem.research_indicators("aprovado") if mem is not None and hasattr(mem, "research_indicators") else [])
+                    if r["tf"] == ctx.focus_tf]
+        rep.data["approved"] = [r["label"] for r in approved]
+        if not approved:
+            rep.abstain = True
+            rep.summary = (f"Nenhum indicador da pesquisa aprovado para {ctx.focus_tf} ainda. "
+                           "Os candidatos ficam no laboratório até provarem vantagem estatística.")
+            return rep
+        cs = ctx.candles(ctx.focus_tf) or []
+        if len(cs) < 120:
+            rep.abstain = True
+            return rep
+        for r in approved:
+            if r["key"] not in CATALOG:
+                continue
+            s = last_signal(r["key"], cs, r["params"])
+            if s:
+                oos = (r["result"] or {}).get("out_sample") or {}
+                edge = (oos.get("rate") or 0.5) - (r["result"] or {}).get("breakeven", 0.556)
+                self.ev(rep, "research_signal", f"{describe(r['key'], r['params'])}: sinal de {DIR_LABEL[s]} "
+                                                f"(validado: {oos.get('rate', 0):.1%} em {oos.get('n')} sinais fora da amostra)",
+                        s, 0.45, min(1.0, 0.4 + edge * 5), ctx.focus_tf)
+        if not rep.evidence:
+            rep.summary = f"Indicadores aprovados ({len(approved)}) sem sinal na última vela fechada."
+        return rep
+
+
 SPECIALISTS = [NewsAgent, PriceActionAgent, RetracementAgent, ReversalAgent, VolumeRSIAgent, VolumeProfileAgent,
-               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent, TimingAgent]
+               SupportResistanceAgent, FibonacciAgent, MultiTimeframeAgent, LiquidityHunterAgent, UserIndicatorsAgent, TrendlineAgent, TimingAgent, ResearchAgent]

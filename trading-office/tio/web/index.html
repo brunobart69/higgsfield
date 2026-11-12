@@ -18,6 +18,7 @@
     <button data-tab="sala">Sala de Operações</button>
     <button data-tab="lab">Laboratório</button>
     <button data-tab="treino">Treinamento</button>
+    <button data-tab="pesquisa">Pesquisa</button>
     <button data-tab="horas">Horários</button>
     <button data-tab="memoria">Memória &amp; Evolução</button>
     <button data-tab="mt5">MT5</button>
@@ -154,6 +155,32 @@
     <div class="card span3"><div class="ch"><h2>Resultado do último ciclo</h2></div><div id="train-result" class="small muted">Nenhum ciclo executado ainda.</div></div>
     <div class="card span3"><div class="ch"><h2>Trading Mistakes Database</h2><button class="ghost" id="mistakes-refresh">Atualizar</button></div><div id="mistakes"></div></div>
     <div class="card span3"><div class="ch"><h2>Ranking dos agentes</h2></div><div id="ranking"></div></div>
+  </section>
+</main>
+
+<!-- ============================ PESQUISA ============================ -->
+<main id="pesquisa" class="tab">
+  <section class="grid">
+    <div class="card">
+      <div class="ch"><h2>Henrique · Pesquisador (agente 16)</h2></div>
+      <p class="small">Busca vídeos-aula, artigos e estudos; avalia a credibilidade; extrai os indicadores citados e testa cada um nos seus dados. Nada entra nas decisões sem passar no laboratório.</p>
+      <div id="res-key"></div>
+      <form id="res-key-form" class="office-actions"><input id="res-key-input" placeholder="Chave da YouTube Data API" autocomplete="off" style="flex:1;min-width:0"><button class="ghost">Salvar chave</button></form>
+      <p><button class="primary" id="res-run">Pesquisar e testar agora</button></p>
+      <div id="res-log" class="small"></div>
+    </div>
+    <div class="card span2">
+      <div class="ch"><h2>Viu uma estratégia num vídeo? Cole aqui</h2></div>
+      <form id="res-text-form" class="form">
+        <textarea id="res-text" rows="4" placeholder="Ex.: No M1 ele usa Bandas de Bollinger 20 2 e entra quando o RSI 7 sai da sobrevenda…"></textarea>
+        <button class="primary">Testar essa ideia</button>
+      </form>
+      <div id="res-text-out"></div>
+    </div>
+    <div class="card span3"><div class="ch"><h2>Laboratório de indicadores</h2></div><div id="res-lab"></div></div>
+    <div class="card span2"><div class="ch"><h2>Biblioteca de estudo</h2></div><div id="res-items" class="res-items"></div></div>
+    <div class="card"><div class="ch"><h2>Trilha de aprendizado</h2></div><div id="res-curr"></div></div>
+    <div class="card span3"><div class="ch"><h2>Catálogo de indicadores pesquisáveis</h2></div><div id="res-cat"></div></div>
   </section>
 </main>
 
