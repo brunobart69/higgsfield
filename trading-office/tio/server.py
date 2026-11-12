@@ -204,6 +204,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, svc: OfficeService | None =
         raise SystemExit("Nenhuma porta livre entre 8765 e 8780. Feche as janelas antigas do escritório e tente de novo.")
     url = f"http://{host}:{port}"
     print(f"AI Trading Intelligence Office em {url}", flush=True)
+    print(f"Se o navegador não abrir sozinho, abra este endereço: {url}", flush=True)
 
     def init():
         try:

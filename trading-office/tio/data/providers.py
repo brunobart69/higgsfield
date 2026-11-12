@@ -226,9 +226,20 @@ class MT5Provider(Provider):
             import MetaTrader5 as mt5  # type: ignore
         except ImportError as e:
             raise RuntimeError("Pacote MetaTrader5 não instalado (pip install MetaTrader5; só funciona no Windows).") from e
+        import threading
         self.mt5 = _SerializedModule(mt5)   # a biblioteca do MT5 não é segura para chamadas simultâneas
-        if not mt5.initialize():
+        print(" · MT5: conectando ao terminal aberto…", flush=True)
+        res: dict = {}
+        th = threading.Thread(target=lambda: res.setdefault("ok", mt5.initialize()), daemon=True)
+        th.start()
+        th.join(40)
+        if th.is_alive():
+            raise RuntimeError("O MetaTrader 5 não respondeu em 40 segundos. Verifique: (1) o MT5 está aberto e logado; "
+                               "(2) não há nenhuma janela de aviso/atualização aberta dentro do MT5; (3) se houver mais de um "
+                               "MT5 instalado, deixe aberto só o da sua corretora. Depois feche esta janela e abra de novo.")
+        if not res.get("ok"):
             raise RuntimeError(f"Não consegui conectar ao MetaTrader 5 aberto: {mt5.last_error()}")
+        print(" · MT5: conectado", flush=True)
         self.TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
                    "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1, "W1": mt5.TIMEFRAME_W1,
                    "MN": mt5.TIMEFRAME_MN1}
@@ -240,7 +251,14 @@ class MT5Provider(Provider):
         self.data_path = Path(term.data_path) if term and getattr(term, "data_path", None) else None
         self.common_path = Path(term.commondata_path) if term and getattr(term, "commondata_path", None) else None
         self.install_path = Path(term.path) if term and getattr(term, "path", None) else None
-        self.exporter_note = self.install_exporter()
+        print(f" · MT5: conta em {self.broker}", flush=True)
+        # instalar/compilar o exportador NUNCA pode segurar a abertura: roda em segundo plano
+        self.exporter_note = "verificando o exportador (em segundo plano)…"
+
+        def _bg():
+            self.exporter_note = self.install_exporter()
+            print(f" · Exportador: {self.exporter_note}", flush=True)
+        threading.Thread(target=_bg, daemon=True).start()
 
     # ------------------------------------------------------------ indicadores do usuário
     @property
@@ -301,7 +319,11 @@ class MT5Provider(Provider):
                 self._compile_tried = True  # tenta compilar uma vez por execução
                 # formato documentado pela MetaQuotes: metaeditor64.exe /compile:"arquivo" /log
                 cmd = f'"{editor}" /compile:"{dst}" /log'
-                subprocess.run(cmd, timeout=120, check=False, shell=False)
+                try:
+                    subprocess.run(cmd, timeout=60, check=False, shell=False)
+                except subprocess.TimeoutExpired:
+                    return ("O MetaEditor não respondeu (talvez esteja aberto). Clique em 'Abrir no MetaEditor' na aba MT5 "
+                            "e aperte F7.")
             if ex5.exists():
                 return "Exportador instalado e compilado."
             return ("Exportador copiado, mas não compilado automaticamente. Clique em 'Abrir no MetaEditor' "

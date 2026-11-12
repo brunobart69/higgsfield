@@ -466,14 +466,15 @@ class OfficeService:
         per_ind = {k.split(":", 1)[1]: {"n": v["n"], "hit_rate": v["hit_rate"], "ci": v["ci"]}
                    for k, v in stats.items() if k.startswith("MT5I:")}
         return {"connected": True, "broker": p.broker, "available": p.list_indicators(), "selected": load_selection(),
-                "roles": load_overrides(), "exporter": store.status(), "exporter_install": p.install_exporter(),
+                "roles": load_overrides(), "exporter": store.status(), "exporter_install": p.exporter_note,
                 "exporter_file": p.exporter_state(),
                 "symbols": {a: p.symbol(a) for a in ASSETS}, "stats": per_ind}
 
     def mt5_open(self, what: str) -> dict:
         if self.provider.name != "mt5":
             return {"error": "Não conectado ao MetaTrader 5."}
-        return {"message": self.provider.open_exporter(what)}
+        msg = self.provider.open_exporter(what)
+        return {"message": msg}
 
     def mt5_select(self, names: list[str]) -> dict:
         from .data.mt5_indicators import save_config, write_exporter_config

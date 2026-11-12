@@ -206,6 +206,10 @@ def test_mt5_user_indicators_flow(monkeypatch, tmp_path):
     from tio.data.providers import MT5Provider
     from tio.service import OfficeService
     p = MT5Provider()
+    for _ in range(50):   # a instalação do exportador roda em segundo plano
+        if (data_dir / "MQL5" / "Experts" / "TIO_Exportador.mq5").exists():
+            break
+        time.sleep(0.05)
     assert (data_dir / "MQL5" / "Experts" / "TIO_Exportador.mq5").exists()   # exportador instalado
     assert p.list_indicators() == ["Setas\\Sinal"]
     svc = OfficeService(provider=p, memory=Memory(":memory:"))
