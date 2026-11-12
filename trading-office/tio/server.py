@@ -107,7 +107,7 @@ def make_handler(svc_or_boot):
                     return self._json(svc.mt5_info())
                 if u.path == "/api/analysis":
                     asset = q.get("asset", "EURUSD").upper()
-                    if asset not in ASSETS:
+                    if asset not in svc.assets and asset not in ASSETS:
                         return self._json({"error": "ativo não monitorado"}, 400)
                     return self._json(svc.analyze(asset, tf))
                 if u.path == "/api/history":

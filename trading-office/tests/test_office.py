@@ -433,3 +433,28 @@ def test_mt5_bridge_converts_unpicklable_results():
     assert out.server == "InfinoxLimited-MT5Live" and out.login == 123
     syms = pickle.loads(pickle.dumps(_plain((AccountInfo("x", 1), AccountInfo("y", 2)))))
     assert [s.server for s in syms] == ["x", "y"]
+
+
+def test_only_pairs_open_in_mt5(monkeypatch, tmp_path):
+    import types
+    from tio.data.providers import MT5Provider
+    from tio.service import OfficeService
+    OfficeService.PREFS_PATH = tmp_path / "prefs.json"
+    monkeypatch.setenv("TIO_MT5_FILES", str(tmp_path))
+    fake = types.SimpleNamespace(
+        TIMEFRAME_M1=1, TIMEFRAME_M5=5, TIMEFRAME_M15=15, TIMEFRAME_M30=30, TIMEFRAME_H1=60, TIMEFRAME_H4=240,
+        TIMEFRAME_D1=1440, TIMEFRAME_W1=10080, TIMEFRAME_MN1=43200, initialize=lambda: True, last_error=lambda: None,
+        account_info=lambda: types.SimpleNamespace(server="Demo"), terminal_info=lambda: None,
+        symbol_info=lambda s: None, symbols_get=lambda: [], symbol_select=lambda s, v: True,
+        symbol_info_tick=lambda s: None, copy_rates_from_pos=lambda *a: None)
+    p = MT5Provider(module=fake)
+    svc = OfficeService(provider=p, memory=Memory(":memory:"))
+    assert svc.assets == __import__("tio.models", fromlist=["x"]).ASSETS          # sem lista ainda: padrão
+    (tmp_path / "charts.tsv").write_bytes("chart\tsymbol\tperiod\tindicators\r\n1\tEURUSDm\t1\tULTRON|\r\n2\tGBPUSD\t5\t\r\n3\tEURUSDm\t5\t\r\n".encode("utf-16"))
+    svc._open_cache = None
+    assert svc.assets == ["EURUSD", "GBPUSD"]
+    assert p.symbol("EURUSD") == "EURUSDm"                                         # nome exato da corretora
+    assert svc.status()["pairs"]["source"] == "gráficos abertos no seu MT5"
+    svc.settings({"pairs_mode": "all"})
+    assert len(svc.assets) == 8
+    OfficeService.PREFS_PATH = None

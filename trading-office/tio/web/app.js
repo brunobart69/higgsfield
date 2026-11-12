@@ -206,6 +206,12 @@ async function loadStatus() {
   if (st.synthetic) msgs.push("⚠ DADOS SINTÉTICOS: nenhuma fonte de mercado configurada. Os gráficos e decisões servem apenas para demonstrar o software — não representam o mercado. Configure dados reais (veja o README).");
   if (!st.news_loaded) msgs.push("Calendário econômico não carregado: o contexto macro aparece como “não avaliado”.");
   b.innerHTML = msgs.map(esc).join("<br>"); b.classList.toggle("hidden", !msgs.length);
+  if (!st.assets.includes(S.asset)) S.asset = st.assets[0];
+  const pi = st.pairs || {};
+  const pb = $("#pairs-bar");
+  if (pb) pb.innerHTML = `Pares analisados: <b>${st.assets.map((a) => a.slice(0, 3) + "/" + a.slice(3)).join(", ")}</b> · origem: ${esc(pi.source || "")}` +
+    (st.mt5 ? ` · <label><input type="checkbox" id="pairs-all" ${pi.mode === "all" ? "checked" : ""}> analisar todos os 8 pares padrão</label>` : "");
+  const pa = $("#pairs-all"); if (pa) pa.onchange = async () => { await post("/api/settings", { pairs_mode: pa.checked ? "all" : "mt5_open" }); await loadStatus(); loadMulti(); };
   const sel = $("#asset"); sel.innerHTML = st.assets.map((a) => `<option value="${a}">${a.slice(0, 3)}/${a.slice(3)}</option>`).join("");
   sel.value = S.asset; sel.onchange = () => { S.asset = sel.value; loadAnalysis(); if (window.OFFICE) window.OFFICE.assetChanged(); };
   $("#bt-assets").innerHTML = st.assets.map((a, i) => `<label><input type="checkbox" name="assets" value="${a}" ${i === 0 ? "checked" : ""}>${a.slice(0, 3)}/${a.slice(3)}</label>`).join("");

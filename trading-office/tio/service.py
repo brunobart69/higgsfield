@@ -44,6 +44,76 @@ class OfficeService:
         self.autopilot = {"running": False, "cycles": 0, "last": None, "errors": []}
         self.prefs = self._load_prefs()
 
+    # ------------------------------------------------------------------ pares analisados
+    @property
+    def assets(self) -> list[str]:
+        """Com o MT5: só os pares com gráfico aberto no terminal (lista enviada pelo TIO_Exportador).
+
+        Sem MT5, ou com o modo "todos", usa a lista padrão de 8 pares.
+        """
+        if self.provider.name != "mt5" or self.prefs.get("pairs_mode", "mt5_open") == "all":
+            return ASSETS
+        opened = self.open_chart_assets()
+        if opened:
+            if opened != getattr(self, "_last_open", None):
+                self._sync_exporter(opened)
+            self._last_open = opened
+        return opened or getattr(self, "_last_open", None) or ASSETS
+
+    def _sync_exporter(self, assets: list[str]) -> None:
+        """Pares novos abertos no MT5 passam a ter os indicadores escolhidos exportados automaticamente."""
+        try:
+            from .data.mt5_indicators import load_selection, write_exporter_config
+            names = load_selection()
+            p = self.provider
+            if names and p.export_dir:
+                syms = [p._symbols.get(a) or p.symbol(a) for a in assets]
+                write_exporter_config(p.export_dir, names, [s for s in syms if s],
+                                      sorted(set(self.tfs) | {"M1", "M5", "M15"}, key=lambda t: TF_SECONDS[t]))
+        except Exception:
+            pass
+
+    def open_chart_assets(self) -> list[str]:
+        now = time.time()
+        cache = getattr(self, "_open_cache", None)
+        if cache and now - cache[0] < 10:
+            return cache[1]
+        out: list[str] = []
+        try:
+            import os
+            from .data.mt5_objects import read_export
+            p = self.provider
+            f = p.export_dir / "charts.tsv" if p.export_dir else None
+            fresh = f is not None and f.exists() and now - os.path.getmtime(f) < 180
+            if fresh:
+                for c in read_export(p.export_dir)["charts"]:
+                    sym = c["symbol"]
+                    letters = re.sub(r"[^A-Za-z]", "", sym).upper()
+                    if len(letters) < 6:
+                        continue
+                    asset = letters[:6]
+                    if asset not in out:
+                        out.append(asset)
+                        p._symbols.setdefault(asset, sym)   # nome exato do símbolo na corretora
+        except Exception:
+            out = []
+        self._open_cache = (now, out)
+        return out
+
+    def pairs_info(self) -> dict:
+        if self.provider.name != "mt5":
+            return {"mode": "all", "source": "lista padrão (sem MT5)", "open": []}
+        mode = self.prefs.get("pairs_mode", "mt5_open")
+        opened = self.open_chart_assets()
+        if mode == "all":
+            src = "todos os 8 pares padrão (escolhido por você)"
+        elif opened:
+            src = "gráficos abertos no seu MT5"
+        else:
+            src = ("lista padrão — ainda não recebi a lista de gráficos abertos (o TIO_Exportador precisa estar ligado "
+                   "em algum gráfico)")
+        return {"mode": mode, "source": src, "open": opened}
+
     # ------------------------------------------------------------------ preferências do usuário
     PREFS_PATH = None
 
@@ -173,13 +243,13 @@ class OfficeService:
             return {}
 
     def status(self) -> dict:
-        md = self.data(ASSETS[0])
+        md = self.data(self.assets[0])
         version, params = self.memory.active_version()
         cov = self.news.coverage()
         return {"provider": self.provider.name, "source": md.source if md else None,
                 "synthetic": bool(md and md.synthetic), "volume_kind": md.volume_kind if md else None,
                 "base_tf": self.base_tf, "tfs": self.tfs, "expiry": {t: self.expiry.get(t, 3) for t in self.tfs},
-                "assets": ASSETS, "model_version": version,
+                "assets": self.assets, "pairs": self.pairs_info(), "model_version": version,
                 "news_loaded": self.news.loaded, "news_events": len(self.news.events),
                 "news_coverage": [fmt_ts(cov[0]), fmt_ts(cov[1])] if cov else None,
                 "last_candle": fmt_ts(md.base[-1].close_ts) if md else None, "payout": params.payout,
@@ -330,7 +400,7 @@ class OfficeService:
     def overview(self, tf: Optional[str] = None) -> list[dict]:
         tf = tf or self.base_tf
         out = []
-        for a in ASSETS:
+        for a in self.assets:
             r = self.analyze(a, tf)
             if "error" in r:
                 out.append({"asset": a, "label": asset_label(a), "error": r["error"]})
@@ -353,7 +423,7 @@ class OfficeService:
         cards = []
         open_trades = {(t["asset"], t["tf"]): dict(t) for t in
                        self.memory.q("SELECT * FROM trades WHERE status='open' AND mode='live'")}
-        for a in ASSETS:
+        for a in self.assets:
             r = self.analyze(a, tf)
             if "error" in r:
                 cards.append({"asset": a, "label": asset_label(a), "error": r["error"]})
@@ -384,7 +454,7 @@ class OfficeService:
             self.autopilot["running"] = True
             while self.autopilot["running"]:
                 for tf in list(self.tfs):
-                    for a in ASSETS:
+                    for a in self.assets:
                         try:
                             self.analyze(a, tf)
                         except Exception as e:  # pragma: no cover
@@ -401,7 +471,11 @@ class OfficeService:
                 self.expiry[tf] = int(n)
         if body.get("tfs"):
             self.tfs = [t for t in body["tfs"] if t in TF_SECONDS] or self.tfs
-        return {"tfs": self.tfs, "expiry": self.expiry}
+        if body.get("pairs_mode") in ("mt5_open", "all"):
+            self.prefs["pairs_mode"] = body["pairs_mode"]
+            self._save_prefs()
+            self._open_cache = None
+        return {"tfs": self.tfs, "expiry": self.expiry, "pairs": self.pairs_info()}
 
     # ------------------------------------------------------------------ horários
     def hours(self) -> dict:
@@ -461,14 +535,14 @@ class OfficeService:
         p = self.provider
         if p.name != "mt5":
             return {"connected": False, "note": "O escritório não está conectado ao MetaTrader 5 (use INICIAR-MT5.bat)."}
-        store, _ = p.indicator_store(ASSETS[0])
+        store, _ = p.indicator_store(self.assets[0])
         stats = self.memory.agent_stats(mode="live")
         per_ind = {k.split(":", 1)[1]: {"n": v["n"], "hit_rate": v["hit_rate"], "ci": v["ci"]}
                    for k, v in stats.items() if k.startswith("MT5I:")}
         return {"connected": True, "broker": p.broker, "available": p.list_indicators(), "selected": load_selection(),
                 "roles": load_overrides(), "exporter": store.status(), "exporter_install": p.exporter_note,
                 "exporter_file": p.exporter_state(),
-                "symbols": {a: p.symbol(a) for a in ASSETS}, "stats": per_ind}
+                "symbols": {a: p.symbol(a) for a in self.assets}, "stats": per_ind}
 
     def mt5_open(self, what: str) -> dict:
         if self.provider.name != "mt5":
@@ -483,7 +557,7 @@ class OfficeService:
             return {"error": "Não conectado ao MetaTrader 5."}
         names = [n for n in names if n in set(p.list_indicators())]
         save_config(names)
-        syms = [p.symbol(a) for a in ASSETS if p.symbol(a)]
+        syms = [p.symbol(a) for a in self.assets if p.symbol(a)]
         write_exporter_config(p.export_dir, names, syms, sorted(set(self.tfs) | {"M1", "M5", "M15"},
                                                                     key=lambda t: TF_SECONDS[t]))
         return {"selected": names}
@@ -602,11 +676,11 @@ class OfficeService:
         if cfg.get("retest"):
             tested = set()
         plan = research_plan(mentions, tested, int(cfg.get("max_tests", 12)))
-        assets = [a for a in (cfg.get("assets") or ASSETS[:4]) if a in ASSETS]
+        assets = [a for a in (cfg.get("assets") or self.assets[:4]) if a in self.assets]
         results = self._test_ideas(plan, ["M1", "M5"], assets, "pesquisa", progress)
         rep = {"found": len(found), "new_items": new, "log": log, "tested": len(results),
                "approved": [r["label"] + " " + r["tf"] for r in results if r["status"] == "aprovado"],
-               "synthetic": bool(self.data(ASSETS[0]) and self.data(ASSETS[0]).synthetic)}
+               "synthetic": bool(self.data(self.assets[0]) and self.data(self.assets[0]).synthetic)}
         self.memory.add_report("pesquisa", "Ciclo de pesquisa do Agente 16", rep)
         return rep
 
@@ -616,7 +690,7 @@ class OfficeService:
         cred = src.credibility(text)
         ments = src.extract_mentions(text)
         ideas = [(m["key"], m["params"]) for m in ments]
-        res = self._test_ideas(ideas, ["M1", "M5"], [a for a in (assets or ASSETS[:4]) if a in ASSETS], "texto do usuário") if ideas else []
+        res = self._test_ideas(ideas, ["M1", "M5"], [a for a in (assets or self.assets[:4]) if a in self.assets], "texto do usuário") if ideas else []
         return {"credibility": cred, "mentions": ments, "results": [{k: r[k] for k in ("label", "tf", "status", "reason", "in_sample", "out_sample", "breakeven", "rule")} for r in res],
                 "note": None if ideas else "Não encontrei indicadores conhecidos no texto. Cite nomes e parâmetros (ex.: 'Bollinger 20 2', 'RSI 7', 'EMA 9 e 21')."}
 
@@ -648,7 +722,7 @@ class OfficeService:
     def train(self, cfg: dict, progress=None) -> dict:
         from .training import run_training
         tf = cfg.get("timeframe") or "M1"
-        assets = [a for a in cfg.get("assets") or ASSETS[:2] if a in ASSETS]
+        assets = [a for a in cfg.get("assets") or self.assets[:2] if a in self.assets]
         datasets = {a: self._md_for(a, tf) for a in assets}
         datasets = {a: d for a, d in datasets.items() if d}
         rep = run_training(datasets, self.memory, self.news, timeframe=tf, split=float(cfg.get("split", 0.6)),
@@ -681,8 +755,9 @@ class OfficeService:
         up = txt.upper()
         asset = None
         for m in re.finditer(r"([A-Z]{3})\s*[/\-]?\s*([A-Z]{3})", up):
-            asset = normalize_asset(m.group(1) + m.group(2))
-            if asset:
+            cand = m.group(1) + m.group(2)
+            if cand in self.assets or normalize_asset(cand):
+                asset = cand
                 break
         if not asset:
             for k, v in ALIASES.items():
@@ -728,7 +803,7 @@ class OfficeService:
             return {"reply": "\n".join(f"{e.to_dict()['time_label']} · {e.currency} · {e.to_dict()['impact_label']} · {e.title} "
                                        f"(fonte: {e.source})" for e in evs), "speaker": H, "transcript": []}
         return {"reply": "Posso consolidar a visão do escritório sobre um ativo — por exemplo: “Qual é a situação do EUR/USD?”. "
-                         "Ativos monitorados: " + ", ".join(asset_label(a) for a in ASSETS) +
+                         "Ativos monitorados: " + ", ".join(asset_label(a) for a in self.assets) +
                          ". Também respondo sobre “desempenho dos agentes” e “notícias”.", "speaker": H, "transcript": []}
 
     # ------------------------------------------------------------------ laboratório
@@ -749,7 +824,7 @@ class OfficeService:
         return jid
 
     def run_backtest(self, cfg: dict, progress=None) -> dict:
-        assets = [a for a in cfg.get("assets") or ASSETS if a in ASSETS]
+        assets = [a for a in cfg.get("assets") or self.assets if a in self.assets]
         tf = cfg.get("timeframe") or self.base_tf
         datasets = {a: self.data(a, tf) for a in assets}
         datasets = {a: d for a, d in datasets.items() if d}
@@ -768,7 +843,7 @@ class OfficeService:
         return m
 
     def learn(self, cfg: dict, progress=None) -> dict:
-        assets = [a for a in cfg.get("assets") or ASSETS[:3] if a in ASSETS]
+        assets = [a for a in cfg.get("assets") or self.assets[:3] if a in self.assets]
         tf = cfg.get("timeframe") or self.base_tf
         datasets = {a: self.data(a, tf) for a in assets}
         datasets = {a: d for a, d in datasets.items() if d}
