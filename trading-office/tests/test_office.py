@@ -420,3 +420,16 @@ def test_mt5_bridge_survives_hangs():
     finally:
         mb.SLOW.clear()
         mb.SLOW.update(old)
+
+
+
+def test_mt5_bridge_converts_unpicklable_results():
+    import pickle
+    from collections import namedtuple
+    from tio.data.mt5_bridge import _plain
+    AccountInfo = namedtuple("AccountInfoLocal", "server login")   # classe local: não é serializável
+    a = AccountInfo("InfinoxLimited-MT5Live", 123)
+    out = pickle.loads(pickle.dumps(_plain(a)))
+    assert out.server == "InfinoxLimited-MT5Live" and out.login == 123
+    syms = pickle.loads(pickle.dumps(_plain((AccountInfo("x", 1), AccountInfo("y", 2)))))
+    assert [s.server for s in syms] == ["x", "y"]

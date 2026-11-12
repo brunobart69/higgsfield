@@ -13,6 +13,16 @@ from typing import Any
 SLOW = {"initialize": 45, "copy_rates_from_pos": 60, "copy_ticks_range": 30, "symbols_get": 30}
 
 
+def _plain(res):
+    """Converte os objetos do MetaTrader5 (AccountInfo, TerminalInfo, SymbolInfo, Tick...) em tipos transportáveis."""
+    import types
+    if hasattr(res, "_asdict"):
+        return types.SimpleNamespace(**{k: _plain(v) for k, v in res._asdict().items()})
+    if isinstance(res, (tuple, list)) and res and hasattr(res[0], "_asdict"):
+        return [_plain(x) for x in res]
+    return res
+
+
 def _worker(conn) -> None:  # roda no processo filho
     try:
         import MetaTrader5 as mt5  # type: ignore
@@ -31,7 +41,7 @@ def _worker(conn) -> None:  # roda no processo filho
         try:
             attr = getattr(mt5, name)
             res = attr(*args, **kwargs) if callable(attr) else attr
-            conn.send(("ok", res))
+            conn.send(("ok", _plain(res)))
         except Exception as e:
             conn.send(("err", repr(e)))
 
